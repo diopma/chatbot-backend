@@ -4,31 +4,42 @@ from flask_cors import CORS
 from groq import Groq
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement depuis .env (optionnel)
+# Charger les variables d'environnement
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# Lire la clé Groq depuis l'environnement
-api_key = os.environ.get("GROQ_API_KEY")
-if not api_key:
+# 🔐 Clé Groq
+groq_api_key = os.environ.get("GROQ_API_KEY")
+if not groq_api_key:
     raise Exception("Définir GROQ_API_KEY dans vos variables d'environnement.")
 
-client = Groq(api_key=api_key)
+client = Groq(api_key=groq_api_key)
 
-# Historique du chat (mémoire temporaire, pour un seul utilisateur)
+# 🔐 Clé secrète pour sécuriser ton API
+API_KEY = os.environ.get("API_KEY")
+if not API_KEY:
+    raise Exception("Définir API_KEY dans vos variables d'environnement.")
+
+# Historique temporaire
 chat_history = []
 
-# Route racine pour tester que le serveur est en ligne
+# Route test
 @app.route("/", methods=["GET"])
 def home():
     return "Serveur Groq STABLE 🚀"
 
-# Route pour le chat
+# Route chat sécurisée
 @app.route("/chat", methods=["POST"])
 def chat():
     global chat_history
+
+    # 🔐 Vérification de la clé API
+    client_key = request.headers.get("x-api-key")
+    if client_key != API_KEY:
+        return jsonify({"error": "Accès refusé 🔒"}), 403
+
     data = request.get_json()
 
     if not data or "message" not in data:
@@ -38,18 +49,20 @@ def chat():
     chat_history.append({"role": "user", "content": user_message})
 
     try:
-        # Limite l'historique aux 10 derniers messages
+        # Limite historique
         recent_history = chat_history[-10:]
 
-        # Appel à Groq
+        # Appel Groq
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Tu es un assistant utile et amical."}, *recent_history],
+            messages=[
+                {"role": "system", "content": "Tu es un assistant utile et amical."},
+                *recent_history
+            ],
             temperature=0.7,
             max_tokens=500
         )
 
-        # Récupérer la réponse du bot
         reply = response.choices[0].message.content or "Réponse vide 🤖"
         chat_history.append({"role": "assistant", "content": reply})
 
@@ -59,7 +72,7 @@ def chat():
         print("ERREUR:", str(e))
         return jsonify({"error": str(e)}), 500
 
-# Démarrage du serveur compatible Render
+# Lancement serveur
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
