@@ -1,44 +1,47 @@
 import os
+import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
 from dotenv import load_dotenv
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-# Charger les variables d'environnement
+# Charger variables
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
+# 🔐 Rate limit (anti spam)
+limiter = Limiter(get_remote_address, app=app)
+
 # 🔐 Clé Groq
 groq_api_key = os.environ.get("GROQ_API_KEY")
 if not groq_api_key:
-    raise Exception("Définir GROQ_API_KEY dans vos variables d'environnement.")
+    raise Exception("Définir GROQ_API_KEY")
 
 client = Groq(api_key=groq_api_key)
 
-# 🔐 Clé secrète pour sécuriser ton API
-API_KEY = os.environ.get("API_KEY")
-if not API_KEY:
-    raise Exception("Définir API_KEY dans vos variables d'environnement.")
-
-# Historique temporaire
 chat_history = []
 
-# Route test
-@app.route("/", methods=["GET"])
-def home():
-    return "Serveur Groq STABLE 🚀"
+# 🔐 Token dynamique (change chaque minute)
+def generate_token():
+    return str(int(time.time() / 60))
 
-# Route chat sécurisée
+@app.route("/")
+def home():
+    return "Serveur sécurisé 🚀"
+
 @app.route("/chat", methods=["POST"])
+@limiter.limit("10 per minute")  # 🔥 anti spam
 def chat():
     global chat_history
 
-    # 🔐 Vérification de la clé API
-    client_key = request.headers.get("x-api-key")
-    if client_key != API_KEY:
-        return jsonify({"error": "Accès refusé 🔒"}), 403
+    # 🔐 Vérifier token
+    client_token = request.headers.get("x-token")
+    if client_token != generate_token():
+        return jsonify({"error": "Token invalide 🔒"}), 403
 
     data = request.get_json()
 
@@ -49,10 +52,8 @@ def chat():
     chat_history.append({"role": "user", "content": user_message})
 
     try:
-        # Limite historique
         recent_history = chat_history[-10:]
 
-        # Appel Groq
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
@@ -69,10 +70,8 @@ def chat():
         return jsonify({"response": reply})
 
     except Exception as e:
-        print("ERREUR:", str(e))
         return jsonify({"error": str(e)}), 500
 
-# Lancement serveur
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
