@@ -7,17 +7,21 @@ from jose import jwt
 app = Flask(__name__)
 CORS(app)
 
-# 🔑 Supabase config
+# 🔐 ENV VARIABLES
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-
-# 🔑 Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not SUPABASE_JWT_SECRET:
+    raise Exception("Missing SUPABASE_JWT_SECRET")
+
+if not GROQ_API_KEY:
+    raise Exception("Missing GROQ_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
 
 chat_history = []
 
-# 🔐 Vérifier JWT
+# 🔐 VERIFY JWT
 def verify_token(token):
     try:
         payload = jwt.decode(
@@ -30,15 +34,23 @@ def verify_token(token):
         print("JWT ERROR:", e)
         return None
 
+@app.route("/", methods=["GET"])
+def home():
+    return "API RUNNING 🚀"
+
+# 🔥 CHAT ROUTE
 @app.route("/chat", methods=["POST"])
 def chat():
     global chat_history
 
-    # 🔐 récupérer token
+    # 🔐 AUTH HEADER
     auth_header = request.headers.get("Authorization")
 
     if not auth_header:
         return jsonify({"error": "Token manquant"}), 401
+
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Format token invalide"}), 401
 
     token = auth_header.split(" ")[1]
 
@@ -59,17 +71,23 @@ def chat():
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "Tu es un assistant utile."},
+                {"role": "system", "content": "Tu es un assistant utile et amical."},
                 *chat_history[-10:]
-            ]
+            ],
+            temperature=0.7,
+            max_tokens=500
         )
 
-        reply = response.choices[0].message.content
+        reply = response.choices[0].message.content or "Réponse vide 🤖"
 
         chat_history.append({"role": "assistant", "content": reply})
 
         return jsonify({"response": reply})
 
     except Exception as e:
-        print("ERREUR:", str(e))
+        print("ERREUR GROQ:", str(e))
         return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
