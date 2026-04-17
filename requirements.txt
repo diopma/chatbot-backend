@@ -4,4 +4,4 @@ groq
 python-dotenv
 gunicorn
 flask-limiter
-python-jose
+
