@@ -6,17 +6,11 @@ from groq import Groq
 app = Flask(__name__)
 CORS(app)
 
-# 🔐 Clé API sécurisée (Render Environment Variable)
-API_KEY = os.getenv("API_KEY")
-
-if not API_KEY:
-    raise Exception("Définir API_KEY dans Render !")
-
-# 🔑 Clé Groq
+# 🔑 Clé Groq (sécurisée côté Render)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    raise Exception("Définir GROQ_API_KEY !")
+    raise Exception("Définir GROQ_API_KEY dans Render !")
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -24,23 +18,15 @@ chat_history = []
 
 @app.route("/")
 def home():
-    return "Serveur sécurisé 🚀"
+    return "Serveur OK 🚀"
 
 @app.route("/chat", methods=["POST"])
 def chat():
     global chat_history
 
-    # 🔐 Vérification API KEY
-    client_key = request.headers.get("x-api-key")
-
-    if not client_key:
-        return jsonify({"error": "Clé API manquante"}), 401
-
-    if client_key != API_KEY:
-        return jsonify({"error": "Clé API invalide"}), 403
-
     data = request.get_json()
 
+    # 🔍 Validation
     if not data or "message" not in data:
         return jsonify({"error": "Message invalide"}), 400
 
@@ -48,6 +34,7 @@ def chat():
     chat_history.append({"role": "user", "content": user_message})
 
     try:
+        # 🧠 Limite historique
         recent_history = chat_history[-10:]
 
         response = client.chat.completions.create(
@@ -68,7 +55,7 @@ def chat():
 
     except Exception as e:
         print("ERREUR:", str(e))
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Erreur serveur"}), 500
 
 
 if __name__ == "__main__":
