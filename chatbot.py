@@ -8,15 +8,13 @@ from groq import Groq
 app = Flask(__name__)
 CORS(app)
 
-# Limite de taille des requêtes à 20MB
-app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024  # 25MB pour WAV non compressé
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise Exception("Définir GROQ_API_KEY dans Render !")
 
 client = Groq(api_key=GROQ_API_KEY)
-
 chat_history = []
 
 
@@ -39,62 +37,76 @@ def chat():
     image_base64 = data.get("image_base64", None)
     image_type   = data.get("image_type", "image/jpeg")
     audio_base64 = data.get("audio_base64", None)
+    audio_ext    = data.get("audio_ext", "wav")   # "wav" ou "m4a" envoyé par le frontend
+    audio_type   = data.get("audio_type", "audio/wav")
 
     # =========================================================
-    # CAS 1 : AUDIO → transcription Whisper améliorée
+    # CAS 1 : AUDIO → transcription Whisper
     # =========================================================
     if has_audio and audio_base64:
         tmp_path = None
+        transcribed_text = None
+
         try:
             audio_bytes = base64.b64decode(audio_base64)
+            print(f"[AUDIO] Taille reçue: {len(audio_bytes)} bytes, format: {audio_ext}")
 
-            # Essaie m4a d'abord, puis wav si échec
-            for ext, mime in [(".m4a", "audio/m4a"), (".wav", "audio/wav"), (".mp4", "audio/mp4")]:
+            # Détermine les formats à essayer selon ce qu'a envoyé le frontend
+            if audio_ext == "wav":
+                formats_to_try = [
+                    (".wav", "audio/wav"),
+                    (".mp3", "audio/mpeg"),
+                    (".m4a", "audio/m4a"),
+                ]
+            else:
+                formats_to_try = [
+                    (".m4a", "audio/m4a"),
+                    (".wav", "audio/wav"),
+                    (".mp3", "audio/mpeg"),
+                ]
+
+            for ext, mime in formats_to_try:
                 try:
                     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                         tmp.write(audio_bytes)
                         tmp_path = tmp.name
 
+                    print(f"[AUDIO] Essai format {ext}...")
+
                     with open(tmp_path, "rb") as audio_file:
                         transcription = client.audio.transcriptions.create(
-                            model="whisper-large-v3-turbo",  # plus rapide et précis
+                            model="whisper-large-v3",        # modèle le plus précis
                             file=(f"audio{ext}", audio_file, mime),
-                            language="fr",                   # force le français
-                            response_format="verbose_json",  # donne plus de détails
-                            prompt="Ceci est un message vocal en français. Transcris exactement ce qui est dit, même les mots courts et courants.",
+                            language="fr",
+                            response_format="verbose_json",
+                            temperature=0.0,                 # déterministe = plus précis
+                            prompt="Transcription d'un message vocal en français. Inclure tous les mots, même courts.",
                         )
-                    os.unlink(tmp_path)
-                    tmp_path = None
-                    break  # succès, on sort de la boucle
+
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                        tmp_path = None
+
+                    if hasattr(transcription, "text") and transcription.text.strip():
+                        transcribed_text = transcription.text.strip()
+                        print(f"[AUDIO] ✅ Transcription réussie ({ext}): '{transcribed_text}'")
+                        break
+                    else:
+                        print(f"[AUDIO] ⚠️ Transcription vide avec {ext}")
 
                 except Exception as fmt_err:
-                    print(f"[AUDIO] Format {ext} échoué: {fmt_err}")
+                    print(f"[AUDIO] ❌ Format {ext} échoué: {fmt_err}")
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                         tmp_path = None
                     continue
 
-            if not transcription:
-                return jsonify({"response": "Je n'ai pas pu transcrire votre message vocal."})
+            if not transcribed_text:
+                return jsonify({
+                    "response": "❌ Je n'ai pas pu transcrire votre message. Essayez de parler plus fort ou plus près du micro."
+                })
 
-            # Récupère le texte transcrit
-            transcribed_text = ""
-            if hasattr(transcription, "text"):
-                transcribed_text = transcription.text.strip()
-
-            # Vérifie la confiance si disponible
-            if hasattr(transcription, "segments") and transcription.segments:
-                avg_confidence = sum(
-                    getattr(seg, "avg_logprob", 0) for seg in transcription.segments
-                ) / len(transcription.segments)
-                print(f"[AUDIO] Confiance moyenne: {avg_confidence:.2f}")
-
-            print(f"[AUDIO] Transcription: '{transcribed_text}'")
-
-            if not transcribed_text or len(transcribed_text.strip()) < 1:
-                return jsonify({"response": "Je n'ai pas compris votre message vocal. Parlez plus clairement ou plus près du micro."})
-
-            # Utilise le texte transcrit comme message
+            # Utilise le texte transcrit pour générer une réponse
             user_message = transcribed_text
 
         except Exception as e:
@@ -132,7 +144,6 @@ def chat():
                 }
             ]
 
-            # Essaie les modèles vision disponibles sur Groq
             vision_models = [
                 "meta-llama/llama-4-scout-17b-16e-instruct",
                 "llama-3.2-11b-vision-preview",
@@ -149,10 +160,10 @@ def chat():
                         max_tokens=1024,
                     )
                     reply = response.choices[0].message.content
-                    print(f"[IMAGE] Modèle utilisé: {model}")
+                    print(f"[IMAGE] ✅ Modèle utilisé: {model}")
                     break
                 except Exception as model_err:
-                    print(f"[IMAGE] Modèle {model} échoué: {model_err}")
+                    print(f"[IMAGE] ❌ {model}: {model_err}")
                     continue
 
             if not reply:
@@ -167,7 +178,7 @@ def chat():
             return jsonify({"response": f"Erreur d'analyse d'image : {str(e)}"}), 500
 
     # =========================================================
-    # CAS 3 : TEXTE (ou texte issu de l'audio)
+    # CAS 3 : TEXTE (ou texte issu de transcription audio)
     # =========================================================
     if not user_message:
         return jsonify({"error": "Message vide"}), 400
@@ -178,24 +189,24 @@ def chat():
         recent_history = chat_history[-10:]
 
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",   # modèle plus puissant pour meilleure réponse
             messages=[
                 {
                     "role": "system",
-                    "content": "Tu es un assistant utile et amical. Réponds toujours en français, de manière claire et concise."
+                    "content": "Tu es un assistant utile, intelligent et amical. Réponds toujours en français, de manière claire et concise."
                 },
                 *recent_history
             ],
             temperature=0.7,
-            max_tokens=500,
+            max_tokens=800,
         )
 
         reply = response.choices[0].message.content or "Réponse vide 🤖"
         chat_history.append({"role": "assistant", "content": reply})
 
-        # Affiche la transcription si c'était un message vocal
+        # Ajoute la transcription dans la réponse audio pour confirmation
         if has_audio:
-            reply = f"🎙️ *Vous avez dit :* « {user_message} »\n\n{reply}"
+            reply = f"🎙️ *« {user_message} »*\n\n{reply}"
 
         return jsonify({"response": reply})
 
