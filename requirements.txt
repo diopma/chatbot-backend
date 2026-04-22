@@ -4,4 +4,5 @@ groq
 python-dotenv
 gunicorn
 flask-limiter
+requests
 
