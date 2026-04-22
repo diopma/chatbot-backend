@@ -56,60 +56,55 @@ TYPE_SIZES = {
 # ─────────────────────────────
 # DETECTION IMAGE (ROBUSTE)
 # ─────────────────────────────
-def detect_image_intent(text):
-
-    lower = text.lower()
-
-    keywords = [
-        "logo", "image", "dessine", "crée",
-        "génère", "illustration", "photo",
-        "avatar", "poster", "banner"
-    ]
-
-    if any(k in lower for k in keywords):
-        return {
-            "is_image_request": True,
-            "type": "general",
-            "visual_prompt": text,
-            "confirmation_message": "🎨 Je génère votre image..."
-        }
-
+def detect_image_intent(user_message: str) -> dict | None:
     try:
-        r = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""
-Analyse ce message et réponds en JSON:
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return ONLY valid JSON. No explanation."
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+Detect if this is an image generation request:
 
-Message: {text}
+Message: {user_message}
 
-Si image:
+Return JSON ONLY:
+
+If image:
 {{
   "is_image_request": true,
   "type": "logo|icon|illustration|photo|pattern|banner|avatar|poster|general",
-  "visual_prompt": "english prompt optimized for AI image generation",
-  "confirmation_message": "Je génère votre image"
+  "visual_prompt": "english prompt",
+  "confirmation_message": "short french message"
 }}
 
-Sinon:
+Else:
 {{"is_image_request": false}}
 """
-            }],
-            temperature=0,
-            max_tokens=200
+                }
+            ],
+            temperature=0.1,
+            max_tokens=300
         )
 
-        raw = r.choices[0].message.content
+        raw = resp.choices[0].message.content.strip()
+
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         data = json.loads(raw)
-        return data if data.get("is_image_request") else None
 
-    except Exception as e:
-        print("[DETECT ERROR]", e)
+        if data.get("is_image_request") is True:
+            return data
+
         return None
 
+    except Exception as e:
+        print("[INTENT ERROR]", e)
+        return None
 
 # ─────────────────────────────
 # IMAGE GENERATION
