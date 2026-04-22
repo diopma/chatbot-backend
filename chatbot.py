@@ -27,18 +27,18 @@ client = Groq(api_key=GROQ_API_KEY)
 chat_history = []
 
 # ─────────────────────────────
-# IMAGE STYLES
+# IMAGE TYPES
 # ─────────────────────────────
 TYPE_PROMPTS = {
-    "logo": "minimalist flat vector logo, clean design, centered",
-    "icon": "simple app icon, flat design",
-    "illustration": "african art illustration, colorful, detailed",
+    "logo": "minimalist flat vector logo, clean design",
+    "icon": "simple app icon, bold shape",
+    "illustration": "african digital illustration, colorful, detailed",
     "photo": "photorealistic DSLR quality",
     "pattern": "african textile seamless pattern",
     "banner": "modern wide banner design",
-    "avatar": "profile portrait centered face",
-    "poster": "event poster, bold typography",
-    "general": "high quality digital art"
+    "avatar": "portrait centered face",
+    "poster": "event poster design",
+    "general": "high quality digital artwork"
 }
 
 TYPE_SIZES = {
@@ -54,16 +54,16 @@ TYPE_SIZES = {
 }
 
 # ─────────────────────────────
-# DETECTION IMAGE (ROBUSTE)
+# 🔥 DETECTION IMAGE ROBUSTE
 # ─────────────────────────────
 def detect_image_intent(text):
 
     lower = text.lower()
 
+    # FORCAGE KEYWORDS (IMPORTANT)
     keywords = [
-        "logo", "image", "dessine", "crée",
-        "génère", "illustration", "photo",
-        "avatar", "poster", "banner"
+        "logo", "image", "dessine", "crée", "génère",
+        "illustration", "photo", "avatar", "poster", "banner"
     ]
 
     if any(k in lower for k in keywords):
@@ -71,7 +71,7 @@ def detect_image_intent(text):
             "is_image_request": True,
             "type": "general",
             "visual_prompt": text,
-            "confirmation_message": "🎨 Je génère votre image..."
+            "confirmation_message": "🎨 Génération de votre image..."
         }
 
     try:
@@ -80,7 +80,7 @@ def detect_image_intent(text):
             messages=[{
                 "role": "user",
                 "content": f"""
-Analyse ce message et réponds en JSON:
+Analyse ce message et réponds UNIQUEMENT en JSON.
 
 Message: {text}
 
@@ -88,7 +88,7 @@ Si image:
 {{
   "is_image_request": true,
   "type": "logo|icon|illustration|photo|pattern|banner|avatar|poster|general",
-  "visual_prompt": "english prompt optimized for AI image generation",
+  "visual_prompt": "english prompt for AI image generation",
   "confirmation_message": "Je génère votre image"
 }}
 
@@ -112,7 +112,7 @@ Sinon:
 
 
 # ─────────────────────────────
-# IMAGE GENERATION
+# 🎨 GENERATION IMAGE
 # ─────────────────────────────
 def generate_image(prompt, gen_type):
 
@@ -121,7 +121,7 @@ def generate_image(prompt, gen_type):
 
     width, height = TYPE_SIZES.get(gen_type, (768, 768))
 
-    # ── FLUX (Together AI) ──
+    # ── TOGETHER AI (FLUX) ──
     if TOGETHER_API_KEY:
         try:
             r = requests.post(
@@ -148,7 +148,7 @@ def generate_image(prompt, gen_type):
         except Exception as e:
             print("[FLUX ERROR]", e)
 
-    # ── FALLBACK POLLINATIONS ──
+    # ── FALLBACK ──
     try:
         encoded = urllib.parse.quote(full_prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
@@ -163,7 +163,7 @@ def generate_image(prompt, gen_type):
 
 
 # ─────────────────────────────
-# CHAT ROUTE
+# 💬 CHAT ROUTE
 # ─────────────────────────────
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -179,7 +179,7 @@ def chat():
     audio_base64 = data.get("audio_base64")
 
     # ─────────────────────────────
-    # 🎙 AUDIO
+    # 🎙 AUDIO (WHISPER)
     # ─────────────────────────────
     if has_audio and audio_base64:
         try:
@@ -232,22 +232,27 @@ def chat():
     # ─────────────────────────────
     intent = detect_image_intent(user_message)
 
-    if intent:
-        img = generate_image(intent["visual_prompt"], intent["type"])
+    # 🔥 FORCE SAFE CHECK
+    if intent and intent.get("is_image_request"):
+
+        img = generate_image(
+            intent.get("visual_prompt", user_message),
+            intent.get("type", "general")
+        )
 
         if img:
             return jsonify({
-                "response": intent["confirmation_message"],
+                "response": intent.get("confirmation_message", "Je génère..."),
                 "has_image": True,
                 "image_base64": img,
-                "image_type": intent["type"],
-                "visual_prompt": intent["visual_prompt"]
+                "image_type": intent.get("type", "general"),
+                "visual_prompt": intent.get("visual_prompt", user_message)
             })
 
-        return jsonify({"response": "❌ Image generation failed"})
+        return jsonify({"response": "❌ Erreur génération image"})
 
     # ─────────────────────────────
-    # 💬 CHAT NORMAL
+    # 💬 CHAT NORMAL (FIX IMPORTANT)
     # ─────────────────────────────
     chat_history.append({"role": "user", "content": user_message})
 
@@ -257,7 +262,15 @@ def chat():
             messages=[
                 {
                     "role": "system",
-                    "content": "Tu es KoraChat, assistant IA africain intelligent."
+                    "content": """
+Tu es KoraChat.
+
+IMPORTANT :
+- Tu n'es pas un assistant textuel limité.
+- Tu peux répondre, analyser images, et générer des visuels.
+- Ne dis jamais que tu es limité au texte.
+- Réponds toujours en français.
+"""
                 },
                 *chat_history[-10:]
             ],
