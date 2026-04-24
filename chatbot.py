@@ -152,6 +152,26 @@ def generate_image(prompt, gen_type):
 
 
 # ─────────────────────────────
+# DETECT IMAGE MIME TYPE
+# ─────────────────────────────
+def get_image_media_type(image_base64: str) -> str:
+    """Détecte le type MIME depuis les magic bytes de l'image."""
+    try:
+        header = base64.b64decode(image_base64[:16])
+        if header[:4] == b'\x89PNG':
+            return "image/png"
+        elif header[:2] == b'\xff\xd8':
+            return "image/jpeg"
+        elif b'WEBP' in header:
+            return "image/webp"
+        elif header[:4] == b'GIF8':
+            return "image/gif"
+    except Exception:
+        pass
+    return "image/jpeg"  # fallback
+
+
+# ─────────────────────────────
 # CHAT ROUTE
 # ─────────────────────────────
 @app.route("/chat", methods=["POST"])
@@ -188,44 +208,63 @@ def chat():
 
             os.unlink(path)
 
-            # ✅ FIX : gestion robuste du retour (str ou objet)
+            # Gestion robuste du retour (str ou objet)
             user_message = transcription if isinstance(transcription, str) else transcription.text
             print("[TRANSCRIPTION]", repr(user_message))
 
             if not user_message or not user_message.strip():
                 return jsonify({"response": "❌ Transcription vide, réessaie de parler plus clairement."})
 
-            # ✅ La suite continue normalement vers detect_image_intent ou chat
-
         except Exception as e:
             print("[AUDIO ERROR]", e)
             return jsonify({"response": f"❌ Erreur audio : {str(e)}"})
 
     # ─────────────────────────────
-    # 🖼 IMAGE ANALYSIS
+    # 🖼 IMAGE ANALYSIS — FORMAT CORRIGÉ
     # ─────────────────────────────
     if has_image and image_base64:
         try:
+            # ✅ Nettoie le préfixe data URI si présent (ex: "data:image/jpeg;base64,...")
+            if "," in image_base64:
+                image_base64 = image_base64.split(",", 1)[1]
+
+            # ✅ Détecte automatiquement le bon type MIME
+            media_type = get_image_media_type(image_base64)
+
+            question = user_message.strip() if user_message.strip() else "Décris cette image en détail en français."
+
+            print(f"[IMAGE ANALYSIS] media_type={media_type}, question={question[:60]}")
+
             r = client.chat.completions.create(
-                model="llama-3.2-11b-vision-preview",
+                # ✅ Modèle vision actuel supporté par Groq (llama-4-scout)
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }},
-                        {"type": "text", "text": user_message if user_message else "Décris cette image"}
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                # ✅ Format data URI correct avec bon media_type
+                                "url": f"data:{media_type};base64,{image_base64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": question
+                        }
                     ]
                 }],
-                max_tokens=800
+                max_tokens=1024
             )
+
             return jsonify({"response": r.choices[0].message.content})
 
         except Exception as e:
-            return jsonify({"response": str(e)})
+            print("[IMAGE ANALYSIS ERROR]", e)
+            return jsonify({"response": f"❌ Erreur analyse image : {str(e)}"})
 
     # ─────────────────────────────
-    # 🎨 DÉTECTION IMAGE
+    # 🎨 DÉTECTION GÉNÉRATION IMAGE
     # ─────────────────────────────
     if user_message.strip():
         intent = detect_image_intent(user_message)
