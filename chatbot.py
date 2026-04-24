@@ -92,9 +92,7 @@ Else:
         )
 
         raw = resp.choices[0].message.content.strip()
-
         raw = raw.replace("```json", "").replace("```", "").strip()
-
         data = json.loads(raw)
 
         if data.get("is_image_request") is True:
@@ -113,7 +111,6 @@ def generate_image(prompt, gen_type):
 
     prefix = TYPE_PROMPTS.get(gen_type, "")
     full_prompt = f"{prefix}, high quality, {prompt}"
-
     width, height = TYPE_SIZES.get(gen_type, (768, 768))
 
     # ── FLUX (Together AI) ──
@@ -136,7 +133,6 @@ def generate_image(prompt, gen_type):
                 },
                 timeout=90
             )
-
             r.raise_for_status()
             return r.json()["data"][0]["b64_json"]
 
@@ -147,9 +143,7 @@ def generate_image(prompt, gen_type):
     try:
         encoded = urllib.parse.quote(full_prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
-
         img = requests.get(url, timeout=90)
-
         return base64.b64encode(img.content).decode()
 
     except Exception as e:
@@ -174,7 +168,7 @@ def chat():
     audio_base64 = data.get("audio_base64")
 
     # ─────────────────────────────
-    # 🎙 AUDIO
+    # 🎙 AUDIO — TRANSCRIPTION + SUITE NORMALE
     # ─────────────────────────────
     if has_audio and audio_base64:
         try:
@@ -185,7 +179,7 @@ def chat():
                 path = tmp.name
 
             with open(path, "rb") as f:
-                text = client.audio.transcriptions.create(
+                transcription = client.audio.transcriptions.create(
                     model="whisper-large-v3",
                     file=("audio.wav", f, "audio/wav"),
                     language="fr",
@@ -193,10 +187,19 @@ def chat():
                 )
 
             os.unlink(path)
-            user_message = text
+
+            # ✅ FIX : gestion robuste du retour (str ou objet)
+            user_message = transcription if isinstance(transcription, str) else transcription.text
+            print("[TRANSCRIPTION]", repr(user_message))
+
+            if not user_message or not user_message.strip():
+                return jsonify({"response": "❌ Transcription vide, réessaie de parler plus clairement."})
+
+            # ✅ La suite continue normalement vers detect_image_intent ou chat
 
         except Exception as e:
-            return jsonify({"response": f"❌ Audio error: {str(e)}"})
+            print("[AUDIO ERROR]", e)
+            return jsonify({"response": f"❌ Erreur audio : {str(e)}"})
 
     # ─────────────────────────────
     # 🖼 IMAGE ANALYSIS
@@ -211,39 +214,42 @@ def chat():
                         {"type": "image_url", "image_url": {
                             "url": f"data:image/jpeg;base64,{image_base64}"
                         }},
-                        {"type": "text", "text": "Décris cette image"}
+                        {"type": "text", "text": user_message if user_message else "Décris cette image"}
                     ]
                 }],
                 max_tokens=800
             )
-
             return jsonify({"response": r.choices[0].message.content})
 
         except Exception as e:
             return jsonify({"response": str(e)})
 
     # ─────────────────────────────
-    # 🎨 IMAGE DETECTION
+    # 🎨 DÉTECTION IMAGE
     # ─────────────────────────────
-    intent = detect_image_intent(user_message)
+    if user_message.strip():
+        intent = detect_image_intent(user_message)
 
-    if intent:
-        img = generate_image(intent["visual_prompt"], intent["type"])
+        if intent:
+            img = generate_image(intent["visual_prompt"], intent["type"])
 
-        if img:
-            return jsonify({
-                "response": intent["confirmation_message"],
-                "has_image": True,
-                "image_base64": img,
-                "image_type": intent["type"],
-                "visual_prompt": intent["visual_prompt"]
-            })
+            if img:
+                return jsonify({
+                    "response": intent["confirmation_message"],
+                    "has_image": True,
+                    "image_base64": img,
+                    "image_type": intent["type"],
+                    "visual_prompt": intent["visual_prompt"]
+                })
 
-        return jsonify({"response": "❌ Image generation failed"})
+            return jsonify({"response": "❌ Génération d'image échouée."})
 
     # ─────────────────────────────
     # 💬 CHAT NORMAL
     # ─────────────────────────────
+    if not user_message.strip():
+        return jsonify({"response": "❌ Message vide."})
+
     chat_history.append({"role": "user", "content": user_message})
 
     try:
