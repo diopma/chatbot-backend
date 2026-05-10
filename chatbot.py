@@ -107,8 +107,8 @@ def detect_image_intent(user_message: str) -> dict | None:
     has_verb  = any(_normalize(v) in words or _normalize(v) in msg for v in ACTION_VERBS)
     has_noun  = any(n in words for n in VISUAL_NOUNS)
 
-    # Besoin d'un verbe ET d'un nom visuel (ou verbe seul si très explicite)
-    is_image = has_verb and has_noun
+    # Verbe + nom visuel, OU nom visuel seul (ex: "logo pour mon resto")
+    is_image = (has_verb and has_noun) or has_noun
 
     if not is_image:
         return None
