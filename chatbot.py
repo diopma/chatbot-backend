@@ -42,7 +42,7 @@ TYPE_SIZES = {
     "illustration": (768,  1024),
     "photo":        (768,  768),
     "pattern":      (1024, 1024),
-    "banner":       (1024, 512),   # réduit : 1200x630 rejeté par FLUX free
+    "banner":       (1024, 512),
     "avatar":       (512,  512),
     "poster":       (768,  1024),
     "general":      (768,  768),
@@ -59,10 +59,6 @@ IMAGE_TYPE_KEYWORDS = {
     "poster":       ["affiche", "poster", "flyer"],
 }
 
-# ─────────────────────────────────────────────────────────────
-# OPTIMISATION : détection image SANS appel LLM supplémentaire
-# On utilise uniquement les mots-clés (rapide, 0 latence)
-# ─────────────────────────────────────────────────────────────
 ACTION_VERBS = [
     "génère","générer","genere","generer",
     "crée","créer","cree","creer",
@@ -85,7 +81,6 @@ VISUAL_NOUNS = [
     "visuel","visuels",
     "dessin","dessins",
     "portrait","portraits",
-    # NB : "image" et "photo" retirés car trop ambigus (ex: "analyse cette image")
 ]
 
 def _normalize(text: str) -> str:
@@ -97,36 +92,22 @@ def _normalize(text: str) -> str:
         .replace("ô","o").replace("ç","c"))
 
 def detect_image_intent(user_message: str) -> dict | None:
-    """
-    Détection rapide par mots-clés uniquement.
-    Supprime l'appel LLM intermédiaire (économise ~500ms par requête).
-    """
     msg   = _normalize(user_message)
     words = msg.split()
-
-    has_verb  = any(_normalize(v) in words or _normalize(v) in msg for v in ACTION_VERBS)
-    has_noun  = any(n in words for n in VISUAL_NOUNS)
-
-    # Verbe + nom visuel, OU nom visuel seul (ex: "logo pour mon resto")
+    has_verb = any(_normalize(v) in words or _normalize(v) in msg for v in ACTION_VERBS)
+    has_noun = any(n in words for n in VISUAL_NOUNS)
     is_image = (has_verb and has_noun) or has_noun
-
     if not is_image:
         return None
-
-    # Détecter le type
     gen_type = "general"
     for t, keywords in IMAGE_TYPE_KEYWORDS.items():
         if any(kw in msg for kw in keywords):
             gen_type = t
             break
-
-    # Construire un prompt anglais minimal
-    visual_prompt = user_message  # Whisper/FLUX gèrent le français
-
     return {
         "is_image_request":     True,
         "type":                 gen_type,
-        "visual_prompt":        visual_prompt,
+        "visual_prompt":        user_message,
         "confirmation_message": "🎨 Image générée !",
     }
 
@@ -162,7 +143,6 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
         except Exception as e:
             print("[FLUX ERROR]", e)
 
-    # Fallback Pollinations
     try:
         encoded = urllib.parse.quote(full_prompt)
         url     = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
@@ -178,16 +158,64 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
 def get_image_media_type(b64: str) -> str:
     try:
         h = base64.b64decode(b64[:20])
-        if h[:4] == b'\x89PNG':    return "image/png"
-        if h[:2] == b'\xff\xd8':   return "image/jpeg"
-        if b'WEBP' in h:           return "image/webp"
-        if h[:4] == b'GIF8':       return "image/gif"
+        if h[:4] == b'\x89PNG':  return "image/png"
+        if h[:2] == b'\xff\xd8': return "image/jpeg"
+        if b'WEBP' in h:         return "image/webp"
+        if h[:4] == b'GIF8':     return "image/gif"
     except Exception:
         pass
     return "image/jpeg"
 
 # ─────────────────────────────────────────────────────────────
-# KEEP-ALIVE : empêche le cold start sur Render Free
+# CHAT NORMAL (fonction séparée, réutilisée après transcription)
+# ─────────────────────────────────────────────────────────────
+def handle_chat(user_message: str, history: list) -> dict:
+    """
+    Traite un message texte : détecte image ou répond en chat.
+    Retourne un dict prêt pour jsonify().
+    """
+    # Génération image ?
+    intent = detect_image_intent(user_message)
+    if intent:
+        img = generate_image(intent["visual_prompt"], intent["type"])
+        if img:
+            return {
+                "response":      intent["confirmation_message"],
+                "has_image":     True,
+                "image_base64":  img,
+                "image_type":    intent["type"],
+                "visual_prompt": intent["visual_prompt"],
+            }
+        return {"response": "❌ Génération échouée. Réessaie."}
+
+    # Chat normal
+    messages = [{
+        "role":    "system",
+        "content": (
+            "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
+            "Tu réponds en français sauf si l'utilisateur écrit dans une autre langue. "
+            "Tu ne prétends JAMAIS ne pas pouvoir créer d'images ou de logos — "
+            "si l'utilisateur demande une image, dis-lui d'utiliser des mots comme "
+            "'crée un logo', 'génère une image', etc."
+        ),
+    }]
+
+    for msg in history[-12:]:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+    messages.append({"role": "user", "content": user_message})
+
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=600,
+    )
+    return {"response": r.choices[0].message.content}
+
+# ─────────────────────────────────────────────────────────────
+# KEEP-ALIVE
 # ─────────────────────────────────────────────────────────────
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -210,13 +238,13 @@ def chat():
     history      = data.get("history", [])
 
     # ──────────────────────────────
-    # 🎙 AUDIO → TRANSCRIPTION
+    # 🎙 AUDIO → TRANSCRIPTION → CHAT
     # ──────────────────────────────
     if has_audio and audio_base64:
         try:
             audio_bytes = base64.b64decode(audio_base64)
 
-            # Détection format par magic bytes
+            # Détection format
             suffix, mime = ".m4a", "audio/mp4"
             if len(audio_bytes) >= 4:
                 if audio_bytes[:4] == b'RIFF':
@@ -228,7 +256,7 @@ def chat():
                 elif audio_bytes[:4] == b'OggS':
                     suffix, mime = ".ogg", "audio/ogg"
 
-            print(f"[AUDIO] format détecté: {suffix} ({len(audio_bytes)} bytes)")
+            print(f"[AUDIO] format={suffix} taille={len(audio_bytes)} bytes")
 
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 tmp.write(audio_bytes)
@@ -242,11 +270,19 @@ def chat():
                 )
             os.unlink(path)
 
-            user_message = transcription if isinstance(transcription, str) else transcription.text
-            print("[TRANSCRIPTION]", repr(user_message))
+            transcribed = transcription if isinstance(transcription, str) else transcription.text
+            transcribed = (transcribed or "").strip()
+            print("[TRANSCRIPTION]", repr(transcribed))
 
-            if not user_message or not user_message.strip():
+            if not transcribed:
                 return jsonify({"response": "❌ Audio non reconnu. Parle plus fort ou plus clairement."})
+
+            # ✅ CORRECTION CLÉ : passer le texte transcrit dans handle_chat
+            # pour qu'il génère une image OU réponde normalement
+            result = handle_chat(transcribed, history)
+            # Ajouter le texte transcrit dans la réponse pour que le frontend l'affiche
+            result["transcription"] = transcribed
+            return jsonify(result)
 
         except Exception as e:
             print("[AUDIO ERROR]", e)
@@ -259,7 +295,6 @@ def chat():
         try:
             if "," in image_base64:
                 image_base64 = image_base64.split(",", 1)[1]
-
             if not image_base64 or len(image_base64) < 100:
                 return jsonify({"response": "❌ Image invalide."})
 
@@ -292,53 +327,13 @@ def chat():
             return jsonify({"response": f"❌ Erreur : {str(e)}"})
 
     # ──────────────────────────────
-    # 🎨 GÉNÉRATION IMAGE
-    # ──────────────────────────────
-    if user_message.strip():
-        intent = detect_image_intent(user_message)
-        if intent:
-            img = generate_image(intent["visual_prompt"], intent["type"])
-            if img:
-                return jsonify({
-                    "response":      intent["confirmation_message"],
-                    "has_image":     True,
-                    "image_base64":  img,
-                    "image_type":    intent["type"],
-                    "visual_prompt": intent["visual_prompt"],
-                })
-            return jsonify({"response": "❌ Génération échouée. Réessaie."})
-
-    # ──────────────────────────────
-    # 💬 CHAT NORMAL
+    # 💬 TEXTE → CHAT
     # ──────────────────────────────
     if not user_message.strip():
         return jsonify({"response": "❌ Message vide."})
 
-    messages = [{
-        "role":    "system",
-        "content": (
-            "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
-            "Tu réponds en français sauf si l'utilisateur écrit dans une autre langue. "
-            "Tu ne prétends JAMAIS ne pas pouvoir créer d'images ou de logos — "
-            "si l'utilisateur demande une image, dis-lui d'utiliser des mots comme "
-            "'crée un logo', 'génère une image', etc."
-        ),
-    }]
-
-    for msg in history[-12:]:
-        if msg.get("role") in ("user", "assistant") and msg.get("content"):
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-    messages.append({"role": "user", "content": user_message})
-
     try:
-        r = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=600,
-        )
-        return jsonify({"response": r.choices[0].message.content})
+        return jsonify(handle_chat(user_message, history))
     except Exception as e:
         print("[CHAT ERROR]", e)
         return jsonify({"error": str(e)}), 500
