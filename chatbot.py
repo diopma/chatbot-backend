@@ -59,55 +59,94 @@ IMAGE_TYPE_KEYWORDS = {
 }
 
 # ─────────────────────────────────────────────────────────────
-# MOTS-CLÉS WOLOF pour la détection image
+# WOLOF — vocabulaire étendu
 # ─────────────────────────────────────────────────────────────
 WOLOF_IMAGE_VERBS = [
-    "def", "defal", "defe",        # faire / créer
-    "bind", "bindal",              # écrire / dessiner
-    "yëgël", "yegal",             # montrer
-    "am", "amal",                  # avoir / produire
-    "seetaan", "seetal",          # regarder / montrer
+    "def", "defal", "defe", "deflu",
+    "bind", "bindal", "bindaale",
+    "yëgël", "yegal", "yëgëlal",
+    "seetaan", "seetal", "seete",
+    "jëfandikoo", "jëfandiku",
+    "am", "amal",
+    "teg", "tegal",
+    "daldi", "daldi def",
 ]
 
 WOLOF_VISUAL_NOUNS = [
-    "logo", "nataal", "nataal-sunu",  # image / photo
-    "dëkk", "liggéey",               # travail / design
-    "avatar", "bannière", "affiche",
+    "nataal", "nataalu", "nataalyi",
+    "logo", "logos",
+    "avatar", "avatars",
+    "bannière", "affiche",
     "dessin", "motif", "pattern",
     "illustration", "poster", "flyer",
+    "liggéey", "liggeeyu",
+    "seen nataal", "sama nataal",
 ]
 
-# ─────────────────────────────────────────────────────────────
-# DÉTECTION LANGUE
-# ─────────────────────────────────────────────────────────────
-WOLOF_MARKERS = [
-    # salutations
-    "nanga def", "nanga", "mangi", "waaw", "deedeet", "yow",
-    "xam", "xam-xam", "jëf", "jëfandikoo",
+# Marqueurs wolof pondérés (score élevé = mot très spécifique au wolof)
+WOLOF_MARKERS_WEIGHTED = {
+    # salutations / formules — très spécifiques
+    "nanga def": 3, "mangi fi": 3, "mangi dem": 3,
+    "jërejëf": 3, "jërëjëf": 3, "baal ma": 3,
+    "yëndul": 3, "waaw waaw": 3, "deedeet": 3,
+    "asalaa maalekum": 2, "maalekum salaam": 2,
+
+    # pronoms / particules — très fréquents en wolof
+    "mangi": 2, "dama": 2, "dafa": 2, "maa ngi": 2,
+    "laa": 2, "naa": 2, "nga": 2, "mu": 2,
+    "yow": 2, "moom": 2, "niit": 2,
+
     # verbes courants
-    "dem", "ñëw", "lekk", "dox", "fëkk", "nekk",
-    "sëdd", "sedd", "topp", "wax", "bind",
-    # mots courants
-    "ndax", "bi", "yi", "si", "ci", "bu", "mu",
-    "sama", "sa", "mo", "nu", "yeen",
-    "mbokk", "jabar", "xale", "baay", "yaay",
-    "dafa", "dama", "maa", "laa", "naa",
-    "ak", "wante", "mbaa",
-    # nombres
-    "benn", "ñaar", "ñett", "ñent", "juróom",
-]
+    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
+    "fëkk": 1, "nekk": 1, "topp": 1, "wax": 1,
+    "xam": 1, "sëdd": 1, "bind": 1, "jëf": 1,
+    "tëdd": 1, "daldi": 1, "bëgg": 1, "soxor": 1,
 
-def detect_language(text: str) -> str:
-    """Retourne 'wolof', 'french', ou 'other'."""
+    # mots courants
+    "ndax": 1, "ndaxte": 1, "waaye": 1, "wante": 1,
+    "mbaa": 1, "ak": 1, "seen": 1, "sama": 1,
+    "bi": 1, "yi": 1, "si": 1, "ci": 1, "bu": 1,
+    "mbokk": 1, "jabar": 1, "xale": 1, "baay": 1, "yaay": 1,
+    "xarit": 1, "doomi": 1, "goor": 1, "jigéen": 1,
+
+    # nombres
+    "benn": 1, "ñaar": 1, "ñett": 1, "ñent": 1,
+    "juróom": 1, "fukk": 1, "temer": 1,
+
+    # expressions typiques
+    "li": 1, "lii": 1, "lool": 1, "dëkk": 1,
+    "sunu": 1, "seen": 1, "leen": 1,
+}
+
+def detect_language(text: str) -> tuple[str, int]:
+    """
+    Retourne ('wolof', score), ('french', score), ou ('other', 0).
+    Score = confiance de détection.
+    """
     t = text.lower()
-    wolof_score = sum(1 for w in WOLOF_MARKERS if w in t)
-    if wolof_score >= 1:
-        return "wolof"
-    french_markers = ["je", "tu", "il", "nous", "vous", "les", "des", "une", "est", "avec"]
-    french_score = sum(1 for w in french_markers if f" {w} " in f" {t} ")
+
+    # Score wolof
+    wolof_score = 0
+    for marker, weight in WOLOF_MARKERS_WEIGHTED.items():
+        if marker in t:
+            wolof_score += weight
+
+    # Score français
+    french_markers = {
+        "je": 1, "tu": 1, "il": 1, "elle": 1, "nous": 1, "vous": 1,
+        "les": 1, "des": 1, "une": 1, "est": 1, "avec": 1,
+        "bonjour": 2, "merci": 2, "comment": 1, "pourquoi": 2,
+        "parce": 2, "alors": 1, "mais": 1, "donc": 1,
+    }
+    french_score = sum(w for m, w in french_markers.items() if f" {m} " in f" {t} ")
+
+    if wolof_score >= 2:
+        return "wolof", wolof_score
+    if wolof_score >= 1 and french_score >= 1:
+        return "wolof_french", wolof_score  # mélange = traiter comme wolof
     if french_score >= 2:
-        return "french"
-    return "other"
+        return "french", french_score
+    return "other", 0
 
 # ─────────────────────────────────────────────────────────────
 # DÉTECTION IMAGE (français + wolof)
@@ -286,18 +325,36 @@ def handle_chat(user_message: str, history: list) -> dict:
             }
         return {"response": "❌ Génération échouée. Réessaie."}
 
-    # Détecter la langue pour adapter le system prompt
-    lang = detect_language(user_message)
+    # Détecter la langue
+    lang, score = detect_language(user_message)
+    print(f"[LANG] {lang} (score={score})")
 
-    if lang == "wolof":
-        system = (
-            "Tu es Yelen AI, un assistant IA sénégalais intelligent et chaleureux. "
-            "L'utilisateur parle en wolof. Réponds en wolof de façon naturelle et concise. "
-            "Tu peux mélanger avec du français si nécessaire (comme on le fait au Sénégal). "
-            "Si l'utilisateur demande une image ou un logo, dis-lui: "
-            "'Wax ko ci wolof: \"def ma logo\" walla \"yokk nataal\"'. "
-            "Exemples de réponses wolof: 'Waaw, maa ngi dem', 'Jërejëf', 'Baal ma'."
-        )
+    if lang in ("wolof", "wolof_french"):
+        system = """Tu es Yelen AI, un assistant IA sénégalais intelligent, chaleureux et moderne.
+Tu parles couramment le wolof et le français, comme un Sénégalais cultivé.
+
+RÈGLES IMPORTANTES :
+1. Si l'utilisateur parle wolof → réponds EN WOLOF en priorité, avec du français si nécessaire (code-switching naturel).
+2. Si l'utilisateur mélange wolof et français → réponds dans le même mélange naturel.
+3. Adapte ton registre : familier avec les jeunes, respectueux avec les aînés.
+4. Pour créer une image/logo, dis : "Wax ko ci wolof: 'def ma yenn nataal bu...' walla 'bind ma logo bu...'"
+5. N'invente pas de mots wolof — si tu ne sais pas, mélange avec du français.
+
+EXPRESSIONS WOLOF UTILES :
+- Salutations: "Nanga def ?", "Mangi fi rekk", "Jërejëf"
+- Accord: "Waaw", "Waaw waaw", "Siiw"
+- Refus/excuse: "Deedeet", "Baal ma"
+- Encouragement: "Yëgël na !", "Baax na !"
+- "Je comprends": "Xam naa"
+- "C'est bien": "Baax na", "Neex na"
+- "Pas de problème": "Amul solo"
+- "Allons-y": "Daldi dem"
+
+Exemples de réponses naturelles :
+- User: "Nanga def ?" → "Mangi fi rekk, jërejëf ! Yow noo ? Lan la be nelaw ?"
+- User: "Dama bëgg xam loolu" → "Waaw, maa ngi wax la ci. [explication]. Xam naa ?"
+- User: "Comment on dit merci en wolof ?" → "Ci wolof, 'merci' mooy 'jërejëf'. Neex na bañ !"
+"""
     else:
         system = (
             "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
@@ -318,7 +375,7 @@ def handle_chat(user_message: str, history: list) -> dict:
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
-        temperature=0.7,
+        temperature=0.75,
         max_tokens=600,
     )
     return {"response": r.choices[0].message.content}
