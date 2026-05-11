@@ -2,7 +2,6 @@ import os
 import base64
 import tempfile
 import urllib.parse
-import json
 import requests
 
 from flask import Flask, request, jsonify
@@ -59,6 +58,60 @@ IMAGE_TYPE_KEYWORDS = {
     "poster":       ["affiche", "poster", "flyer"],
 }
 
+# ─────────────────────────────────────────────────────────────
+# MOTS-CLÉS WOLOF pour la détection image
+# ─────────────────────────────────────────────────────────────
+WOLOF_IMAGE_VERBS = [
+    "def", "defal", "defe",        # faire / créer
+    "bind", "bindal",              # écrire / dessiner
+    "yëgël", "yegal",             # montrer
+    "am", "amal",                  # avoir / produire
+    "seetaan", "seetal",          # regarder / montrer
+]
+
+WOLOF_VISUAL_NOUNS = [
+    "logo", "nataal", "nataal-sunu",  # image / photo
+    "dëkk", "liggéey",               # travail / design
+    "avatar", "bannière", "affiche",
+    "dessin", "motif", "pattern",
+    "illustration", "poster", "flyer",
+]
+
+# ─────────────────────────────────────────────────────────────
+# DÉTECTION LANGUE
+# ─────────────────────────────────────────────────────────────
+WOLOF_MARKERS = [
+    # salutations
+    "nanga def", "nanga", "mangi", "waaw", "deedeet", "yow",
+    "xam", "xam-xam", "jëf", "jëfandikoo",
+    # verbes courants
+    "dem", "ñëw", "lekk", "dox", "fëkk", "nekk",
+    "sëdd", "sedd", "topp", "wax", "bind",
+    # mots courants
+    "ndax", "bi", "yi", "si", "ci", "bu", "mu",
+    "sama", "sa", "mo", "nu", "yeen",
+    "mbokk", "jabar", "xale", "baay", "yaay",
+    "dafa", "dama", "maa", "laa", "naa",
+    "ak", "wante", "mbaa",
+    # nombres
+    "benn", "ñaar", "ñett", "ñent", "juróom",
+]
+
+def detect_language(text: str) -> str:
+    """Retourne 'wolof', 'french', ou 'other'."""
+    t = text.lower()
+    wolof_score = sum(1 for w in WOLOF_MARKERS if w in t)
+    if wolof_score >= 1:
+        return "wolof"
+    french_markers = ["je", "tu", "il", "nous", "vous", "les", "des", "une", "est", "avec"]
+    french_score = sum(1 for w in french_markers if f" {w} " in f" {t} ")
+    if french_score >= 2:
+        return "french"
+    return "other"
+
+# ─────────────────────────────────────────────────────────────
+# DÉTECTION IMAGE (français + wolof)
+# ─────────────────────────────────────────────────────────────
 ACTION_VERBS = [
     "génère","générer","genere","generer",
     "crée","créer","cree","creer",
@@ -68,7 +121,7 @@ ACTION_VERBS = [
     "produis","produire",
     "réalise","realise",
     "generate","create","draw","make","render","produce","design","imagine",
-]
+] + WOLOF_IMAGE_VERBS
 
 VISUAL_NOUNS = [
     "logo","logos",
@@ -81,7 +134,7 @@ VISUAL_NOUNS = [
     "visuel","visuels",
     "dessin","dessins",
     "portrait","portraits",
-]
+] + WOLOF_VISUAL_NOUNS
 
 def _normalize(text: str) -> str:
     return (text.lower()
@@ -167,13 +220,58 @@ def get_image_media_type(b64: str) -> str:
     return "image/jpeg"
 
 # ─────────────────────────────────────────────────────────────
-# CHAT NORMAL (fonction séparée, réutilisée après transcription)
+# TRANSCRIPTION AUDIO — avec prompt Wolof pour Whisper
+# ─────────────────────────────────────────────────────────────
+def transcribe_audio(audio_bytes: bytes) -> str:
+    """
+    Transcrit l'audio avec Whisper.
+    On tente d'abord sans langue forcée (auto-détection),
+    puis avec prompt Wolof si le résultat semble mauvais.
+    """
+    # Détection format
+    suffix, mime = ".m4a", "audio/mp4"
+    if len(audio_bytes) >= 4:
+        if audio_bytes[:4] == b'RIFF':
+            suffix, mime = ".wav", "audio/wav"
+        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+            suffix, mime = ".mp3", "audio/mpeg"
+        elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':
+            suffix, mime = ".m4a", "audio/mp4"
+        elif audio_bytes[:4] == b'OggS':
+            suffix, mime = ".ogg", "audio/ogg"
+
+    print(f"[AUDIO] format={suffix} taille={len(audio_bytes)} bytes")
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        path = tmp.name
+
+    try:
+        with open(path, "rb") as f:
+            # Prompt multilingue : aide Whisper à reconnaître
+            # le français, le wolof et les termes mixtes
+            transcription = client.audio.transcriptions.create(
+                model="whisper-large-v3",          # ← large-v3 (meilleur que turbo pour langues rares)
+                file=(f"audio{suffix}", f, mime),
+                response_format="text",
+                prompt=(
+                    "Ce message peut être en français, en wolof, ou un mélange des deux. "
+                    "Wolof: nanga def, waaw, deedeet, sama, xam, dafa, mangi, jëf, "
+                    "ndax, mbokk, xale, baay, yaay, dem, ñëw, lekk, wax, nekk, topp. "
+                    "Termes techniques possibles: logo, image, avatar, créer, générer."
+                ),
+                # Pas de language= forcé → auto-détection Whisper
+            )
+    finally:
+        os.unlink(path)
+
+    result = transcription if isinstance(transcription, str) else transcription.text
+    return (result or "").strip()
+
+# ─────────────────────────────────────────────────────────────
+# HANDLE CHAT (texte → image ou réponse)
 # ─────────────────────────────────────────────────────────────
 def handle_chat(user_message: str, history: list) -> dict:
-    """
-    Traite un message texte : détecte image ou répond en chat.
-    Retourne un dict prêt pour jsonify().
-    """
     # Génération image ?
     intent = detect_image_intent(user_message)
     if intent:
@@ -188,17 +286,28 @@ def handle_chat(user_message: str, history: list) -> dict:
             }
         return {"response": "❌ Génération échouée. Réessaie."}
 
-    # Chat normal
-    messages = [{
-        "role":    "system",
-        "content": (
+    # Détecter la langue pour adapter le system prompt
+    lang = detect_language(user_message)
+
+    if lang == "wolof":
+        system = (
+            "Tu es Yelen AI, un assistant IA sénégalais intelligent et chaleureux. "
+            "L'utilisateur parle en wolof. Réponds en wolof de façon naturelle et concise. "
+            "Tu peux mélanger avec du français si nécessaire (comme on le fait au Sénégal). "
+            "Si l'utilisateur demande une image ou un logo, dis-lui: "
+            "'Wax ko ci wolof: \"def ma logo\" walla \"yokk nataal\"'. "
+            "Exemples de réponses wolof: 'Waaw, maa ngi dem', 'Jërejëf', 'Baal ma'."
+        )
+    else:
+        system = (
             "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
             "Tu réponds en français sauf si l'utilisateur écrit dans une autre langue. "
             "Tu ne prétends JAMAIS ne pas pouvoir créer d'images ou de logos — "
             "si l'utilisateur demande une image, dis-lui d'utiliser des mots comme "
             "'crée un logo', 'génère une image', etc."
-        ),
-    }]
+        )
+
+    messages = [{"role": "system", "content": system}]
 
     for msg in history[-12:]:
         if msg.get("role") in ("user", "assistant") and msg.get("content"):
@@ -244,43 +353,16 @@ def chat():
         try:
             audio_bytes = base64.b64decode(audio_base64)
 
-            # Détection format
-            suffix, mime = ".m4a", "audio/mp4"
-            if len(audio_bytes) >= 4:
-                if audio_bytes[:4] == b'RIFF':
-                    suffix, mime = ".wav", "audio/wav"
-                elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
-                    suffix, mime = ".mp3", "audio/mpeg"
-                elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':
-                    suffix, mime = ".m4a", "audio/mp4"
-                elif audio_bytes[:4] == b'OggS':
-                    suffix, mime = ".ogg", "audio/ogg"
+            if len(audio_bytes) < 1000:
+                return jsonify({"response": "❌ Audio trop court. Parle plus longtemps."})
 
-            print(f"[AUDIO] format={suffix} taille={len(audio_bytes)} bytes")
-
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                tmp.write(audio_bytes)
-                path = tmp.name
-
-            with open(path, "rb") as f:
-                transcription = client.audio.transcriptions.create(
-                    model="whisper-large-v3-turbo",
-                    file=(f"audio{suffix}", f, mime),
-                    response_format="text",
-                )
-            os.unlink(path)
-
-            transcribed = transcription if isinstance(transcription, str) else transcription.text
-            transcribed = (transcribed or "").strip()
+            transcribed = transcribe_audio(audio_bytes)
             print("[TRANSCRIPTION]", repr(transcribed))
 
             if not transcribed:
                 return jsonify({"response": "❌ Audio non reconnu. Parle plus fort ou plus clairement."})
 
-            # ✅ CORRECTION CLÉ : passer le texte transcrit dans handle_chat
-            # pour qu'il génère une image OU réponde normalement
             result = handle_chat(transcribed, history)
-            # Ajouter le texte transcrit dans la réponse pour que le frontend l'affiche
             result["transcription"] = transcribed
             return jsonify(result)
 
