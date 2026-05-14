@@ -293,7 +293,7 @@ def transcribe_audio(audio_bytes: bytes) -> str:
             result = client.audio.transcriptions.create(
                 model="whisper-large-v3",
                 file=(f"audio{suffix}", f, mime),
-                response_format="verbose_json",  # ← donne aussi la langue détectée
+                response_format="text",          # ← "text" uniquement, Groq ne supporte pas verbose_json
                 prompt=(
                     "Transcris exactement ce qui est dit. "
                     "Ce message est en français ou en wolof sénégalais, "
@@ -305,10 +305,9 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                     "Termes tech possibles: logo, image, avatar, créer, générer."
                 ),
             )
-        # verbose_json retourne un objet avec .text et .language
-        text = result.text if hasattr(result, "text") else str(result)
-        lang_detected = getattr(result, "language", "unknown")
-        print(f"[WHISPER] langue={lang_detected} | texte={repr(text)}")
+        # response_format="text" retourne directement une string
+        text = result if isinstance(result, str) else getattr(result, "text", str(result))
+        print(f"[WHISPER] texte={repr(text)}")
         return (text or "").strip()
 
     finally:
