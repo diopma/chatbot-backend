@@ -50,12 +50,12 @@ TYPE_SIZES = {
 IMAGE_TYPE_KEYWORDS = {
     "logo":         ["logo"],
     "icon":         ["icône", "icone", "icon"],
-    "illustration": ["illustration", "art", "dessin", "nataal bu"],
-    "photo":        ["photo", "photographie", "réaliste", "realistic"],
-    "pattern":      ["motif", "pattern", "kente", "wax", "textile", "tissu"],
-    "banner":       ["bannière", "banniere", "banner", "couverture"],
-    "avatar":       ["avatar", "profil", "portrait", "visage"],
-    "poster":       ["affiche", "poster", "flyer"],
+    "illustration": ["illustration", "art", "dessin", "nataal bu", "nataal yu rafet"],
+    "photo":        ["photo", "photographie", "réaliste", "realistic", "nataal bu dëkk"],
+    "pattern":      ["motif", "pattern", "kente", "wax", "textile", "tissu", "mbañ"],
+    "banner":       ["bannière", "banniere", "banner", "couverture", "nataal bu bon"],
+    "avatar":       ["avatar", "profil", "portrait", "visage", "seen bët", "sama bët"],
+    "poster":       ["affiche", "poster", "flyer", "nataal bu liggéey"],
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -69,10 +69,11 @@ IMAGE_TRIGGERS = [
     "affiche", "poster", "posters", "flyer", "flyers",
     "motif", "pattern", "patterns", "visuel", "visuels",
     "dessin", "dessins", "portrait", "portraits",
-    # Wolof
-    "nataal", "nataalu", "nataalyi",   # image / photo
-    "sama nataal", "seen nataal",
-    "liggéey bu nataal",
+    # Wolof — image / photo
+    "nataal", "nataalu", "nataalyi", "nataalye",
+    "sama nataal", "seen nataal", "yenn nataal",
+    "nataal bu rafet", "nataal bu baax",
+    "liggéey bu nataal", "liggeeyu nataal",
 ]
 
 IMAGE_VERBS = [
@@ -85,13 +86,17 @@ IMAGE_VERBS = [
     "génère-moi", "fais-moi", "crée-moi",
     # Anglais
     "generate", "create", "draw", "make", "render", "design",
-    # Wolof
-    "def", "defal",       # faire / créer
-    "bind", "bindal",     # dessiner / écrire
-    "yëgël", "yegal",     # montrer
-    "def ma", "bind ma",  # fais-moi / dessine-moi
-    "yokk", "yokkal",     # ajouter / faire
-    "am", "amal",         # avoir / produire
+    # Wolof — verbes d'action
+    "def", "defal", "deflu",          # faire / créer
+    "bind", "bindal", "bindaale",     # dessiner / écrire
+    "yëgël", "yegal", "yëgëlal",     # montrer
+    "def ma", "bind ma", "yëgël ma",  # fais-moi / dessine-moi / montre-moi
+    "yokk", "yokkal",                  # ajouter / faire
+    "am", "amal",                      # avoir / produire
+    "teg", "tegal",                    # mettre / créer
+    "daldi def", "daldi bind",         # vas créer / vas dessiner
+    "seet", "seetal",                  # regarder / montrer
+    "wone", "woneel",                  # montrer / présenter
 ]
 
 def _norm(text: str) -> str:
@@ -136,23 +141,54 @@ def detect_image_intent(msg: str) -> dict | None:
 # DÉTECTION LANGUE wolof vs français
 # ─────────────────────────────────────────────────────────────
 WOLOF_WORDS = {
-    # Score 3 = très spécifique au wolof
-    "nanga def": 3, "mangi fi": 3, "jërejëf": 3, "jërëjëf": 3,
-    "baal ma": 3, "deedeet": 3, "maa ngi": 3, "waaw waaw": 3,
-    "def ma": 3, "bind ma": 3, "nataal": 3, "nataalu": 3,
-    # Score 2 = fréquent en wolof
-    "mangi": 2, "dama": 2, "dafa": 2, "waaw": 2, "yow": 2,
-    "moom": 2, "laa": 2, "naa": 2, "nga": 2, "niit": 2,
-    "xam": 2, "bëgg": 2, "nekk": 2,
-    # Score 1 = courant
-    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1, "fëkk": 1,
-    "topp": 1, "wax": 1, "sëdd": 1, "bind": 1, "jëf": 1,
-    "tëdd": 1, "ndax": 1, "waaye": 1, "mbaa": 1,
-    "ak": 1, "sama": 1, "seen": 1, "ci": 1, "bi": 1,
-    "yi": 1, "bu": 1, "mbokk": 1, "xale": 1, "baay": 1,
-    "yaay": 1, "xarit": 1, "goor": 1, "jigéen": 1,
-    "benn": 1, "ñaar": 1, "ñett": 1, "juróom": 1,
-    "lool": 1, "sunu": 1, "leen": 1, "def": 1,
+    # ── Score 4 : expressions très spécifiques au wolof ──
+    "nanga def": 4, "nanga xam": 4, "nanga dem": 4,
+    "mangi fi rekk": 4, "maa ngi fi": 4, "mangi dem": 4,
+    "jërejëf lool": 4, "baal ma ko": 4, "waaw waaw": 4,
+    "dafa baax": 4, "dafa neex": 4, "dafa mel ni": 4,
+    "xam naa": 4, "faamaak": 4, "amul solo": 4,
+    "def ma": 4, "bind ma": 4, "yëgël ma": 4,
+    "soo bëgg": 4, "bëgg naa": 4,
+    "lu baax": 4, "lu neex": 4,
+
+    # ── Score 3 : mots très spécifiques au wolof ──
+    "jërejëf": 3, "jërëjëf": 3, "baal ma": 3,
+    "deedeet": 3, "mangi fi": 3, "mangi": 3,
+    "maa ngi": 3, "nataal": 3, "nataalu": 3,
+    "liggéey": 3, "liggeeyu": 3,
+    "dafa": 3, "dama": 3, "xam": 3,
+    "bëgg": 3, "siiw": 3, "rekk": 3,
+    "yëgël": 3, "woneel": 3, "wone": 3,
+    "ndanka": 3, "ndanka ndanka": 3,
+    "mbokk": 3, "xarit": 3,
+
+    # ── Score 2 : fréquent en wolof ──
+    "waaw": 2, "yow": 2, "moom": 2,
+    "laa": 2, "naa": 2, "nga": 2, "niit": 2,
+    "nekk": 2, "topp": 2, "wax": 2,
+    "gis": 2, "gisul": 2,
+    "dëkk": 2, "sunu": 2, "leen": 2,
+    "rafet": 2, "baax": 2, "neex": 2,
+    "ndax": 2, "waaye": 2, "mbaa": 2,
+    "tey": 2, "bëccëk": 2, "guddi": 2,
+    "jaay": 2, "jënd": 2,
+    "xol": 2, "bàkkaar": 2,
+    "daldi": 2, "seet": 2,
+
+    # ── Score 1 : mots courants ──
+    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
+    "fëkk": 1, "bind": 1, "jëf": 1, "tëdd": 1,
+    "ak": 1, "sama": 1, "seen": 1,
+    "ci": 1, "bi": 1, "yi": 1, "bu": 1, "si": 1,
+    "baay": 1, "yaay": 1, "xale": 1,
+    "goor": 1, "jigéen": 1, "doom": 1,
+    "benn": 1, "ñaar": 1, "ñett": 1,
+    "ñent": 1, "juróom": 1, "fukk": 1,
+    "lool": 1, "def": 1, "am": 1,
+    "ko": 1, "leen": 1, "len": 1,
+    "mu": 1, "nu": 1, "ñu": 1,
+    "dox": 1, "set": 1, "setal": 1,
+    "tëral": 1, "tax": 1, "di": 1,
 }
 
 def detect_language(text: str) -> str:
@@ -316,36 +352,122 @@ def transcribe_audio(audio_bytes: bytes) -> str:
 # ─────────────────────────────────────────────────────────────
 # HANDLE CHAT — cœur de la logique
 # ─────────────────────────────────────────────────────────────
-WOLOF_SYSTEM = """Tu es Yelen AI, un assistant IA sénégalais intelligent et chaleureux.
-Tu parles wolof et français couramment, comme un Dakarois éduqué.
+WOLOF_SYSTEM = """Tu es Yelen AI, un assistant IA sénégalais intelligent, chaleureux et moderne.
+Tu parles wolof et français couramment, comme un jeune Dakarois éduqué.
 
 RÈGLES STRICTES :
 1. Si l'utilisateur parle wolof → réponds EN WOLOF avec du français si nécessaire.
-2. Si mélange wolof-français → réponds dans le même mélange naturel (code-switching).
-3. Ne force PAS le wolof si la question est en français pur → réponds en français.
-4. Sois concis, naturel, chaleureux.
-5. N'invente JAMAIS de mots wolof — si tu ne sais pas, dis-le en français.
-6. Pour générer une image en wolof : "Wax : 'def ma logo' walla 'bind ma nataal'"
+2. Si mélange wolof-français (nouchi dakarois) → réponds dans le même style.
+3. Ne force PAS le wolof si la question est 100% française → réponds en français.
+4. Sois concis, naturel, chaleureux. Pas de réponses trop longues.
+5. N'invente JAMAIS de mots wolof inexistants — utilise du français si tu ne sais pas.
+6. Pour générer une image : dis "Wax ko : 'def ma logo bu...' walla 'nataal...'"
 
-VOCABULAIRE WOLOF DE BASE (utilise-le naturellement) :
-- Salut: "Nanga def ?", "Mangi fi rekk"
-- Merci: "Jërejëf", "Jërejëf lool"
-- Oui: "Waaw", "Waaw waaw"
-- Non: "Deedeet"
-- Bien: "Baax na", "Neex na"
-- D'accord: "Siiw", "Waaw baax na"
-- Excuse: "Baal ma"
-- Je comprends: "Xam naa", "Faamaak"
-- Pas de problème: "Amul solo"
-- C'est bon: "Baax na", "Dafa baax"
-- Je veux: "Dama bëgg"
-- Comment: "Naka"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VOCABULAIRE WOLOF ESSENTIEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-EXEMPLES DE RÉPONSES NATURELLES :
-- "Nanga def ?" → "Mangi fi rekk, jërejëf ! Yow noo ?"
-- "Dama bëgg xam..." → "Waaw, maa ngi wax la. [réponse]. Xam naa ?"
-- "Logo bi neex na !" → "Jërejëf lool ! Dafa baax moom ?"
-- "Def ma yenn logo" → "Waaw ! Wax ma soo bëgg : magasin, restaurant, walla lan ?"
+SALUTATIONS :
+• "Nanga def ?" → Comment vas-tu ?
+• "Mangi fi rekk" → Je suis là / Ça va
+• "Nanga xam ?" → Est-ce que tu sais ?
+• "Maa ngi dem" → Je m'en vais
+• "Asalaa maalekum" → Paix sur vous
+• "Maalekum salaam" → Et sur vous la paix
+
+REMERCIEMENTS / POLITESSE :
+• "Jërejëf" → Merci
+• "Jërejëf lool" → Merci beaucoup
+• "Baal ma" → Excuse-moi / Pardon
+• "Amul solo" → Pas de problème
+• "Yëgël na !" → Bien sûr ! / Je comprends !
+
+OUI / NON :
+• "Waaw" → Oui
+• "Waaw waaw" → Oui oui (confirmer)
+• "Deedeet" → Non
+• "Siiw" → Exact / C'est ça
+
+ÉMOTIONS / QUALITÉS :
+• "Dafa baax" → C'est bien / C'est bon
+• "Dafa neex" → C'est agréable / C'est bon (goût/sensation)
+• "Dafa rafet" → C'est beau
+• "Dafa mel ni..." → Ça ressemble à...
+• "Neex na lool" → C'est vraiment bien
+• "Baax na" → C'est bon / Ça va
+• "Rafet na" → C'est beau
+
+VERBES COURANTS :
+• "Dem" → Aller
+• "Ñëw" → Venir
+• "Lekk" → Manger
+• "Lekkal" → Mange (impératif)
+• "Wax" → Parler / Dire
+• "Xam" → Savoir / Connaître
+• "Bëgg" → Vouloir / Aimer
+• "Gis" → Voir
+• "Jëf" → Faire (action)
+• "Def" → Faire / Créer
+• "Bind" → Écrire / Dessiner
+• "Dox" → Marcher / Aller
+• "Jaay" → Vendre
+• "Jënd" → Acheter
+• "Topp" → Suivre
+• "Seet" → Regarder / Vérifier
+• "Nekk" → Être / Se trouver
+• "Am" → Avoir
+
+PRONOMS :
+• "Maa ngi" / "Mangi" → Je suis / Moi je
+• "Dama" → Je (+ verbe)
+• "Dafa" → Il/Elle (+ verbe)
+• "Yow" → Toi
+• "Moom" → Lui / Elle
+• "Sunu" → Notre / Nous
+• "Seen" → Leur / Eux
+• "Sama" → Mon / Ma / Mes
+
+TEMPS / MOMENT :
+• "Tey" → Aujourd'hui
+• "Bëccëk" → Ce matin
+• "Guddi" → Ce soir / La nuit
+• "Bi" → Le (article défini)
+• "Yi" → Les (article pluriel)
+
+QUESTIONS :
+• "Lan ?" → Quoi ?
+• "Kan ?" → Qui ?
+• "Fan ?" → Où ?
+• "Naka ?" → Comment ?
+• "Ndax ?" → Est-ce que ? / Pourquoi ?
+• "Buki ?" → Combien ?
+• "Kañ ?" → Quand ?
+
+EXPRESSIONS POPULAIRES DAKAR :
+• "Dafa gëna baax" → C'est encore mieux
+• "Ndanka ndanka" → Doucement / Petit à petit
+• "Waaw, rekk !" → Oui, exactement !
+• "Maa ko def" → Je vais le faire
+• "Xam naa" → Je sais / Je comprends
+• "Xamul" → Il/elle ne sait pas
+• "Dëkk bi" → La ville / Le quartier
+• "Bu baax" → Si c'est bien
+• "Soo bëgg" → Si tu veux
+• "Lu baax" → Ce qui est bien
+• "Téere bi" → Le livre
+• "Liggéey" → Travail / Travailler
+• "Jaraay" → Se battre / Essayer
+• "Daldi" → Vite / Allons-y
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXEMPLES DE CONVERSATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• "Nanga def ?" → "Mangi fi rekk, jërejëf ! Yow noo ?"
+• "Dama bëgg xam..." → "Waaw, maa ngi wax la ci. [réponse]. Xam naa ?"
+• "Logo bi rafet na !" → "Jërejëf lool ! Dafa baax na ?"
+• "Def ma yenn logo" → "Waaw ! Wax ma soo bëgg : magasin bi, restaurant, walla lan ?"
+• "Lan moy Yelen AI ?" → "Maa ngi Yelen AI — intelligence artificielle bu Afrika. Dama dem jëf ci sa liggéey ak sa kow !"
+• "Yaangi dem fan ?" → "Mangi nekk ci internet bi, dégëlu kaw !"
 """
 
 FRENCH_SYSTEM = (
