@@ -87,20 +87,19 @@ IMAGE_VERBS = [
     # Anglais
     "generate", "create", "draw", "make", "render", "design",
     # Wolof — verbes d'action
-    "def", "defal", "deflu",          # faire / créer
-    "bind", "bindal", "bindaale",     # dessiner / écrire
-    "yëgël", "yegal", "yëgëlal",     # montrer
-    "def ma", "bind ma", "yëgël ma",  # fais-moi / dessine-moi / montre-moi
-    "yokk", "yokkal",                  # ajouter / faire
-    "am", "amal",                      # avoir / produire
-    "teg", "tegal",                    # mettre / créer
-    "daldi def", "daldi bind",         # vas créer / vas dessiner
-    "seet", "seetal",                  # regarder / montrer
-    "wone", "woneel",                  # montrer / présenter
+    "def", "defal", "deflu",
+    "bind", "bindal", "bindaale",
+    "yëgël", "yegal", "yëgëlal",
+    "def ma", "bind ma", "yëgël ma",
+    "yokk", "yokkal",
+    "am", "amal",
+    "teg", "tegal",
+    "daldi def", "daldi bind",
+    "seet", "seetal",
+    "wone", "woneel",
 ]
 
 def _norm(text: str) -> str:
-    """Normalise le texte : minuscules + suppression accents."""
     return (text.lower()
         .replace("é","e").replace("è","e").replace("ê","e")
         .replace("à","a").replace("â","a").replace("ç","c")
@@ -120,11 +119,9 @@ def detect_image_intent(msg: str) -> dict | None:
         for v in IMAGE_VERBS
     )
 
-    # Déclenche si : (verbe + nom) OU nom seul suffit
     if not (has_noun or (has_verb and has_noun)):
         return None
 
-    # Détecter le type d'image
     gen_type = "general"
     for t, keywords in IMAGE_TYPE_KEYWORDS.items():
         if any(_norm(kw) in m for kw in keywords):
@@ -141,7 +138,6 @@ def detect_image_intent(msg: str) -> dict | None:
 # DÉTECTION LANGUE wolof vs français
 # ─────────────────────────────────────────────────────────────
 WOLOF_WORDS = {
-    # ── Score 4 : expressions très spécifiques au wolof ──
     "nanga def": 4, "nanga xam": 4, "nanga dem": 4,
     "mangi fi rekk": 4, "maa ngi fi": 4, "mangi dem": 4,
     "jërejëf lool": 4, "baal ma ko": 4, "waaw waaw": 4,
@@ -150,8 +146,6 @@ WOLOF_WORDS = {
     "def ma": 4, "bind ma": 4, "yëgël ma": 4,
     "soo bëgg": 4, "bëgg naa": 4,
     "lu baax": 4, "lu neex": 4,
-
-    # ── Score 3 : mots très spécifiques au wolof ──
     "jërejëf": 3, "jërëjëf": 3, "baal ma": 3,
     "deedeet": 3, "mangi fi": 3, "mangi": 3,
     "maa ngi": 3, "nataal": 3, "nataalu": 3,
@@ -161,8 +155,6 @@ WOLOF_WORDS = {
     "yëgël": 3, "woneel": 3, "wone": 3,
     "ndanka": 3, "ndanka ndanka": 3,
     "mbokk": 3, "xarit": 3,
-
-    # ── Score 2 : fréquent en wolof ──
     "waaw": 2, "yow": 2, "moom": 2,
     "laa": 2, "naa": 2, "nga": 2, "niit": 2,
     "nekk": 2, "topp": 2, "wax": 2,
@@ -174,8 +166,6 @@ WOLOF_WORDS = {
     "jaay": 2, "jënd": 2,
     "xol": 2, "bàkkaar": 2,
     "daldi": 2, "seet": 2,
-
-    # ── Score 1 : mots courants ──
     "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
     "fëkk": 1, "bind": 1, "jëf": 1, "tëdd": 1,
     "ak": 1, "sama": 1, "seen": 1,
@@ -185,9 +175,9 @@ WOLOF_WORDS = {
     "benn": 1, "ñaar": 1, "ñett": 1,
     "ñent": 1, "juróom": 1, "fukk": 1,
     "lool": 1, "def": 1, "am": 1,
-    "ko": 1, "leen": 1, "len": 1,
+    "ko": 1, "len": 1,
     "mu": 1, "nu": 1, "ñu": 1,
-    "dox": 1, "set": 1, "setal": 1,
+    "set": 1, "setal": 1,
     "tëral": 1, "tax": 1, "di": 1,
 }
 
@@ -208,10 +198,10 @@ def detect_language(text: str) -> str:
     if wolof_score >= 2:
         return "wolof"
     if wolof_score >= 1 and french_score >= 1:
-        return "wolof"   # mélange → traiter comme wolof
+        return "wolof"
     if french_score >= 2:
         return "french"
-    return "french"      # défaut = français
+    return "french"
 
 # ─────────────────────────────────────────────────────────────
 # TRADUCTION PROMPT → ANGLAIS (pour FLUX)
@@ -254,7 +244,6 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
 
     print(f"[IMAGE] type={gen_type} | {full[:80]}...")
 
-    # Together AI — FLUX
     if TOGETHER_API_KEY:
         try:
             r = requests.post(
@@ -279,7 +268,6 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
         except Exception as e:
             print("[FLUX ERR]", e)
 
-    # Fallback Pollinations
     try:
         enc = urllib.parse.quote(full)
         url = f"https://image.pollinations.ai/prompt/{enc}?width={w}&height={h}&nologo=true&enhance=true&model=flux"
@@ -306,7 +294,6 @@ def get_mime(b64: str) -> str:
 # TRANSCRIPTION AUDIO — optimisée wolof + français
 # ─────────────────────────────────────────────────────────────
 def transcribe_audio(audio_bytes: bytes) -> str:
-    # Détection format
     suffix, mime = ".m4a", "audio/mp4"
     if len(audio_bytes) >= 4:
         if audio_bytes[:4] == b'RIFF':
@@ -329,7 +316,7 @@ def transcribe_audio(audio_bytes: bytes) -> str:
             result = client.audio.transcriptions.create(
                 model="whisper-large-v3",
                 file=(f"audio{suffix}", f, mime),
-                response_format="text",          # ← "text" uniquement, Groq ne supporte pas verbose_json
+                response_format="text",
                 prompt=(
                     "Transcris exactement ce qui est dit. "
                     "Ce message est en français ou en wolof sénégalais, "
@@ -341,7 +328,6 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                     "Termes tech possibles: logo, image, avatar, créer, générer."
                 ),
             )
-        # response_format="text" retourne directement une string
         text = result if isinstance(result, str) else getattr(result, "text", str(result))
         print(f"[WHISPER] texte={repr(text)}")
         return (text or "").strip()
@@ -350,7 +336,7 @@ def transcribe_audio(audio_bytes: bytes) -> str:
         os.unlink(path)
 
 # ─────────────────────────────────────────────────────────────
-# HANDLE CHAT — cœur de la logique
+# SYSTÈME DE PROMPTS
 # ─────────────────────────────────────────────────────────────
 WOLOF_SYSTEM = """Tu es Yelen AI, un assistant IA sénégalais intelligent, chaleureux et moderne.
 Tu parles wolof et français couramment, comme un jeune Dakarois éduqué.
@@ -459,15 +445,12 @@ EXPRESSIONS POPULAIRES DAKAR :
 • "Jaraay" → Se battre / Essayer
 • "Daldi" → Vite / Allons-y
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXEMPLES DE CONVERSATIONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXEMPLES DE CONVERSATIONS :
 • "Nanga def ?" → "Mangi fi rekk, jërejëf ! Yow noo ?"
 • "Dama bëgg xam..." → "Waaw, maa ngi wax la ci. [réponse]. Xam naa ?"
 • "Logo bi rafet na !" → "Jërejëf lool ! Dafa baax na ?"
 • "Def ma yenn logo" → "Waaw ! Wax ma soo bëgg : magasin bi, restaurant, walla lan ?"
 • "Lan moy Yelen AI ?" → "Maa ngi Yelen AI — intelligence artificielle bu Afrika. Dama dem jëf ci sa liggéey ak sa kow !"
-• "Yaangi dem fan ?" → "Mangi nekk ci internet bi, dégëlu kaw !"
 """
 
 FRENCH_SYSTEM = (
@@ -477,6 +460,9 @@ FRENCH_SYSTEM = (
     "si demandé, utilise : 'crée un logo', 'génère une image', etc."
 )
 
+# ─────────────────────────────────────────────────────────────
+# HANDLE CHAT
+# ─────────────────────────────────────────────────────────────
 def handle_chat(user_message: str, history: list) -> dict:
     # 1. Vérifier si c'est une demande d'image
     intent = detect_image_intent(user_message)
@@ -549,7 +535,8 @@ def chat():
                 return jsonify({"response": "❌ Audio non reconnu. Rapproche-toi du micro et réessaie."})
 
             result = handle_chat(transcribed, history)
-            result["transcription"] = transcribed
+            result["transcription"]    = transcribed
+            result["is_voice_message"] = True   # ← FLAG : réponse vocale attendue
             return jsonify(result)
 
         except Exception as e:
