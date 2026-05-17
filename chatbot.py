@@ -544,9 +544,12 @@ def chat():
         except Exception as e:
             return jsonify({"response": f"❌ Erreur : {str(e)}"})
 
-    # ── 💬 TEXTE ──
-    if not user_message.strip():
-        return jsonify({"response": "❌ Message vide."})
+   # ── 💬 TEXTE ──
+if not user_message.strip() and not has_document and not has_image and not has_audio:
+    return jsonify({"response": "❌ Message vide."})
+
+if not user_message.strip():
+    user_message = "Résume et analyse ce document en détail."
 
     try:
         return jsonify(handle_chat(user_message, history))
