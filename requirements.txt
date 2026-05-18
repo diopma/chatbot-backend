@@ -5,4 +5,8 @@ python-dotenv
 gunicorn
 flask-limiter
 requests
+python-docx
+openpyxl
+pypdf
+PyPDF2
 
