@@ -11,7 +11,7 @@ from groq import Groq
 
 app = Flask(__name__)
 CORS(app)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB pour les docs
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 GROQ_API_KEY     = os.getenv("GROQ_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
@@ -170,31 +170,26 @@ def detect_language(text: str) -> str:
 # EXTRACTION TEXTE DOCUMENT
 # ─────────────────────────────────────────────────────────────
 def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
-    """
-    Extrait le texte d'un document selon son type.
-    Supporte : PDF, DOCX, TXT, CSV, XLSX, MD
-    """
     ext = filename.lower().split(".")[-1] if "." in filename else ""
     print(f"[DOC] Extension: {ext} | Taille: {len(file_bytes)} bytes")
 
-    # ── TXT / MD / CSV ──
+    # TXT / MD / CSV / code
     if ext in ("txt", "md", "csv", "json", "xml", "html", "py", "js"):
         try:
             return file_bytes.decode("utf-8", errors="replace")[:15000]
         except Exception as e:
             return f"Erreur lecture texte: {e}"
 
-    # ── PDF ──
+    # PDF
     if ext == "pdf":
         try:
             import pypdf
             reader = pypdf.PdfReader(io.BytesIO(file_bytes))
             text = ""
-            for page in reader.pages[:20]:  # max 20 pages
+            for page in reader.pages[:20]:
                 text += page.extract_text() or ""
             return text[:15000] if text.strip() else "PDF sans texte extractible (probablement scanné)."
         except ImportError:
-            # Fallback si pypdf pas installé
             try:
                 import PyPDF2
                 reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
@@ -207,7 +202,7 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
         except Exception as e:
             return f"Erreur PDF: {e}"
 
-    # ── DOCX ──
+    # DOCX
     if ext == "docx":
         try:
             import docx
@@ -215,17 +210,17 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
             text = "\n".join([para.text for para in doc.paragraphs])
             return text[:15000]
         except ImportError:
-            return "❌ python-docx non installé. Installe avec: pip install python-docx"
+            return "❌ python-docx non installé."
         except Exception as e:
             return f"Erreur DOCX: {e}"
 
-    # ── XLSX / XLS ──
+    # XLSX / XLS
     if ext in ("xlsx", "xls"):
         try:
             import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
             text = ""
-            for sheet in wb.sheetnames[:3]:  # max 3 feuilles
+            for sheet in wb.sheetnames[:3]:
                 ws = wb[sheet]
                 text += f"\n--- Feuille: {sheet} ---\n"
                 for row in ws.iter_rows(max_row=100, values_only=True):
@@ -234,11 +229,10 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
                         text += row_text + "\n"
             return text[:15000]
         except ImportError:
-            return "❌ openpyxl non installé. Installe avec: pip install openpyxl"
+            return "❌ openpyxl non installé."
         except Exception as e:
             return f"Erreur XLSX: {e}"
 
-    # ── Format inconnu ──
     return f"❌ Format '{ext}' non supporté. Formats acceptés : PDF, DOCX, TXT, CSV, XLSX, MD."
 
 
@@ -246,8 +240,6 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
 # ANALYSE DOCUMENT VIA LLM
 # ─────────────────────────────────────────────────────────────
 def analyze_document(doc_text: str, filename: str, question: str, lang: str) -> str:
-    """Envoie le contenu du document au LLM pour analyse."""
-
     if lang == "wolof":
         system = (
             "Tu es Yelen AI, assistant sénégalais expert en analyse de documents. "
@@ -262,13 +254,8 @@ def analyze_document(doc_text: str, filename: str, question: str, lang: str) -> 
             "Sois concis, structuré et clair. Réponds en français."
         )
 
-    prompt = f"""Voici le contenu du document "{filename}" :
-
----
-{doc_text[:12000]}
----
-
-Question : {question if question.strip() else "Fais un résumé complet de ce document."}"""
+    q = question.strip() if question.strip() else "Fais un résumé complet de ce document."
+    prompt = f'Voici le contenu du document "{filename}" :\n\n---\n{doc_text[:12000]}\n---\n\nQuestion : {q}'
 
     try:
         r = client.chat.completions.create(
@@ -294,7 +281,7 @@ def translate_prompt_to_english(prompt: str) -> str:
         r = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "You are an image prompt translator. Translate the user's request (in any language) into a detailed English image generation prompt. Be descriptive and specific. Add quality keywords like 'professional', 'high quality', 'detailed'. Return ONLY the English prompt, no explanation, no quotes."},
+                {"role": "system", "content": "You are an image prompt translator. Translate the user's request (in any language) into a detailed English image generation prompt. Return ONLY the English prompt, no explanation, no quotes."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2, max_tokens=120,
@@ -357,10 +344,14 @@ def get_mime(b64: str) -> str:
 def transcribe_audio(audio_bytes: bytes) -> str:
     suffix, mime = ".m4a", "audio/mp4"
     if len(audio_bytes) >= 4:
-        if audio_bytes[:4] == b'RIFF':            suffix, mime = ".wav",  "audio/wav"
-        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb': suffix, mime = ".mp3", "audio/mpeg"
-        elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':        suffix, mime = ".m4a", "audio/mp4"
-        elif audio_bytes[:4] == b'OggS':          suffix, mime = ".ogg",  "audio/ogg"
+        if audio_bytes[:4] == b'RIFF':
+            suffix, mime = ".wav", "audio/wav"
+        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+            suffix, mime = ".mp3", "audio/mpeg"
+        elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':
+            suffix, mime = ".m4a", "audio/mp4"
+        elif audio_bytes[:4] == b'OggS':
+            suffix, mime = ".ogg", "audio/ogg"
 
     print(f"[AUDIO] {suffix} — {len(audio_bytes)} bytes")
 
@@ -399,7 +390,6 @@ RÈGLES STRICTES :
 3. Ne force PAS le wolof si la question est 100% française → réponds en français.
 4. Sois concis, naturel, chaleureux. Pas de réponses trop longues.
 5. N'invente JAMAIS de mots wolof inexistants — utilise du français si tu ne sais pas.
-6. Pour générer une image : dis "Wax ko : 'def ma logo bu...' walla 'nataal...'"
 
 SALUTATIONS : "Nanga def ?" → Comment vas-tu ? | "Mangi fi rekk" → Je suis là
 REMERCIEMENTS : "Jërejëf" → Merci | "Jërejëf lool" → Merci beaucoup
@@ -410,7 +400,7 @@ OUI/NON : "Waaw" → Oui | "Deedeet" → Non
 FRENCH_SYSTEM = (
     "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
     "Tu réponds toujours en français. "
-    "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel. "
+    "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel."
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -449,7 +439,7 @@ def ping():
     return "pong", 200
 
 # ─────────────────────────────────────────────────────────────
-# ROUTE /chat
+# ROUTE /chat  ← CORRIGÉE : indentation et ordre des blocs
 # ─────────────────────────────────────────────────────────────
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -457,15 +447,15 @@ def chat():
     if not data:
         return jsonify({"error": "invalid request"}), 400
 
-    user_message  = data.get("message", "")
-    has_image     = data.get("has_image", False)
-    image_base64  = data.get("image_base64")
-    has_audio     = data.get("has_audio", False)
-    audio_base64  = data.get("audio_base64")
-    has_document  = data.get("has_document", False)   # ← NOUVEAU
-    doc_base64    = data.get("doc_base64")             # ← NOUVEAU
-    doc_filename  = data.get("doc_filename", "document.txt")  # ← NOUVEAU
-    history       = data.get("history", [])
+    user_message = data.get("message", "")
+    has_image    = data.get("has_image", False)
+    image_base64 = data.get("image_base64")
+    has_audio    = data.get("has_audio", False)
+    audio_base64 = data.get("audio_base64")
+    has_document = data.get("has_document", False)
+    doc_base64   = data.get("doc_base64")
+    doc_filename = data.get("doc_filename", "document.txt")
+    history      = data.get("history", [])
 
     # ── 🎙 AUDIO ──
     if has_audio and audio_base64:
@@ -485,13 +475,12 @@ def chat():
             print("[AUDIO ERR]", e)
             return jsonify({"response": f"❌ Erreur audio : {str(e)}"})
 
-    # ── 📄 DOCUMENT ── ← NOUVEAU BLOC
+    # ── 📄 DOCUMENT ──
     if has_document and doc_base64:
         try:
             doc_bytes = base64.b64decode(doc_base64)
             print(f"[DOC] Fichier reçu: {doc_filename} | {len(doc_bytes)} bytes")
 
-            # Extraire le texte
             doc_text = extract_text_from_document(doc_bytes, doc_filename)
 
             if doc_text.startswith("❌"):
@@ -499,18 +488,16 @@ def chat():
 
             print(f"[DOC] Texte extrait: {len(doc_text)} caractères")
 
-            # Détecter la langue de la question
             question = user_message.strip()
             lang = detect_language(question) if question else "french"
 
-            # Analyser avec le LLM
             response = analyze_document(doc_text, doc_filename, question, lang)
 
             return jsonify({
-                "response":      response,
-                "has_document":  True,
-                "doc_filename":  doc_filename,
-                "doc_chars":     len(doc_text),
+                "response":     response,
+                "has_document": True,
+                "doc_filename": doc_filename,
+                "doc_chars":    len(doc_text),
             })
 
         except Exception as e:
@@ -544,12 +531,10 @@ def chat():
         except Exception as e:
             return jsonify({"response": f"❌ Erreur : {str(e)}"})
 
-   # ── 💬 TEXTE ──
-if not user_message.strip() and not has_document and not has_image and not has_audio:
-    return jsonify({"response": "❌ Message vide."})
-
-if not user_message.strip():
-    user_message = "Résume et analyse ce document en détail."
+    # ── 💬 TEXTE ──
+    # Ne retourner "message vide" QUE si vraiment rien n'a été envoyé
+    if not user_message.strip():
+        return jsonify({"response": "❌ Message vide."})
 
     try:
         return jsonify(handle_chat(user_message, history))
