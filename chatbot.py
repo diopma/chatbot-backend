@@ -115,56 +115,142 @@ def detect_image_intent(msg: str) -> dict | None:
     }
 
 # ─────────────────────────────────────────────────────────────
-# DÉTECTION LANGUE
+# DÉTECTION LANGUE — vocabulaire wolof étendu et pondéré
 # ─────────────────────────────────────────────────────────────
 WOLOF_WORDS = {
-    "nanga def": 4, "nanga xam": 4, "nanga dem": 4,
-    "mangi fi rekk": 4, "maa ngi fi": 4, "mangi dem": 4,
-    "jërejëf lool": 4, "baal ma ko": 4, "waaw waaw": 4,
-    "dafa baax": 4, "dafa neex": 4, "dafa mel ni": 4,
-    "xam naa": 4, "faamaak": 4, "amul solo": 4,
-    "def ma": 4, "bind ma": 4, "yëgël ma": 4,
-    "soo bëgg": 4, "bëgg naa": 4, "lu baax": 4, "lu neex": 4,
-    "jërejëf": 3, "jërëjëf": 3, "baal ma": 3,
-    "deedeet": 3, "mangi fi": 3, "mangi": 3,
-    "maa ngi": 3, "nataal": 3, "nataalu": 3,
-    "liggéey": 3, "liggeeyu": 3,
-    "dafa": 3, "dama": 3, "xam": 3,
-    "bëgg": 3, "siiw": 3, "rekk": 3,
-    "yëgël": 3, "woneel": 3, "wone": 3,
-    "ndanka": 3, "ndanka ndanka": 3, "mbokk": 3, "xarit": 3,
-    "waaw": 2, "yow": 2, "moom": 2,
-    "laa": 2, "naa": 2, "nga": 2, "niit": 2,
-    "nekk": 2, "topp": 2, "wax": 2, "gis": 2, "gisul": 2,
-    "dëkk": 2, "sunu": 2, "leen": 2,
-    "rafet": 2, "baax": 2, "neex": 2,
-    "ndax": 2, "waaye": 2, "mbaa": 2,
-    "tey": 2, "bëccëk": 2, "guddi": 2,
-    "jaay": 2, "jënd": 2, "xol": 2, "bàkkaar": 2,
-    "daldi": 2, "seet": 2,
-    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
-    "fëkk": 1, "bind": 1, "jëf": 1, "tëdd": 1,
-    "ak": 1, "sama": 1, "seen": 1,
-    "ci": 1, "bi": 1, "yi": 1, "bu": 1, "si": 1,
-    "baay": 1, "yaay": 1, "xale": 1,
-    "goor": 1, "jigéen": 1, "doom": 1,
-    "benn": 1, "ñaar": 1, "ñett": 1,
-    "ñent": 1, "juróom": 1, "fukk": 1,
-    "lool": 1, "def": 1, "am": 1,
-    "ko": 1, "len": 1, "mu": 1, "nu": 1, "ñu": 1,
-    "set": 1, "setal": 1, "tëral": 1, "tax": 1, "di": 1,
+
+    # ══ Score 5 : expressions uniquement wolof, très distinctives ══
+    "nanga def":        5, "nanga xam":       5, "nanga dem":       5,
+    "mangi fi rekk":    5, "maa ngi fi":      5, "mangi dem":       5,
+    "jërejëf lool":     5, "baal ma ko":      5, "waaw waaw":       5,
+    "dafa baax na":     5, "dafa neex na":    5, "dafa rafet na":   5,
+    "dafa mel ni":      5, "xam naa":         5, "faamaak":         5,
+    "amul solo":        5, "def ma":          5, "bind ma":         5,
+    "yëgël ma":         5, "soo bëgg":        5, "bëgg naa":        5,
+    "lu baax":          5, "lu neex":         5, "maa ngi dem":     5,
+    "asalaa maalekum":  5, "maalekum salaam": 5,
+    "dama bëgg":        5, "dama dem":        5, "dama nekk":       5,
+    "yow noo":          5, "lan moy":         5, "fan nga dem":     5,
+    "naka nga def":     5, "naka waay":       5,
+    "bul fekk":         5, "bul ko wax":      5,
+    "dëgg naa":         5, "dégg naa":        5,
+    "fii rekk":         5, "fi rekk":         5,
+    "mooy":             5, "mooye":           5,
+    "loolu moy":        5, "lool la":         5,
+    "waxoon na":        5, "waxoon naa":      5,
+    "liggéeyal ma":     5, "liggéeyal":       5,
+    "sëriñ":            5,
+
+    # ══ Score 4 : mots très distinctifs wolof ══
+    "jërejëf":  4, "jërëjëf":  4, "baal ma":   4,
+    "deedeet":  4, "mangi fi":  4, "mangi":     4,
+    "maa ngi":  4, "nataal":    4, "nataalu":   4,
+    "liggéey":  4, "liggeeyu":  4,
+    "dafa":     4, "dama":      4, "xam":       4,
+    "bëgg":     4, "siiw":      4, "rekk":      4,
+    "yëgël":    4, "woneel":    4, "wone":      4,
+    "ndanka":   4, "ndanka ndanka": 4,
+    "mbokk":    4, "xarit":     4,
+    "télé bi":  4, "kër gi":    4, "dekk bi":   4,
+    "suñu":     4, "sunu":      4,
+    "dëkk":     4, "xeex":      4,
+    "tubaab":   4, "nit":       4, "niit":      4,
+    "wolof":    4, "seereer":   4, "pulaar":    4,
+    "muñ":      4, "muñël":     4,
+    "tëgg":     4, "tëgël":     4,
+    "fëkk":     4, "fëkkeel":   4,
+    "digg":     4, "digël":     4,
+    "taaw":     4, "taawël":    4,
+    "soppi":    4, "soppil":    4,
+    "añ":       4, "añël":      4,
+    "jaaxle":   4, "jaaxal":    4,
+    "ñëlëm":    4, "xool":      4, "xoolël":    4,
+    "wëñ":      4, "wëñël":     4,
+    "bëgg bëgg": 4,
+    "ñaar":     4, "ñett":      4, "ñent":      4,
+    "juróom":   4, "fukk":      4, "téeméer":   4,
+    "junni":    4,
+    "ñaar fukk": 4, "ñett fukk": 4,
+
+    # ══ Score 3 : courants en wolof ══
+    "waaw":   3, "yow":    3, "moom":    3,
+    "laa":    3, "naa":    3, "nga":     3,
+    "nekk":   3, "topp":   3, "wax":     3,
+    "gis":    3, "gisul":  3,
+    "rafet":  3, "baax":   3, "neex":    3,
+    "ndax":   3, "waaye":  3, "mbaa":    3,
+    "tey":    3, "bëccëk": 3, "guddi":   3,
+    "jaay":   3, "jënd":   3,
+    "xol":    3, "bàkkaar": 3,
+    "daldi":  3, "seet":   3,
+    "leen":   3, "sunu":   3,
+    "fanaan": 3, "tëëy":   3,
+    "kaay":   3, "kaaye":  3,
+    "ñëw":    3, "dem":    3,
+    "lekk":   3, "dox":    3,
+    "bind":   3, "jëf":    3,
+    "tëdd":   3, "xaar":   3,
+    "jox":    3, "joxël":  3,
+    "naan":   3, "naanël":  3,
+    "xëy":    3, "xëyël":  3,
+    "teg":    3, "tegël":  3,
+    "fal":    3, "falël":  3,
+    "gën":    3, "gëna":   3,
+    "sol":    3, "solël":  3,
+    "door":   3, "doorël": 3,
+
+    # ══ Score 2 : particules, pronoms, articles wolof ══
+    "ak":   2, "sama":  2, "seen":  2,
+    "ci":   2, "bi":    2, "yi":    2,
+    "bu":   2, "si":    2, "gi":    2,
+    "ki":   2, "ji":    2, "li":    2,
+    "baay": 2, "yaay":  2, "xale":  2,
+    "goor": 2, "jigéen": 2, "doom": 2,
+    "benn": 2, "lool":  2, "def":   2,
+    "am":   2, "ko":    2, "len":   2,
+    "mu":   2, "nu":    2, "ñu":    2,
+    "set":  2, "setal": 2, "tax":   2,
+    "di":   2, "la":    2, "le":    2,
+    "na":   2, "ni":    2, "fi":    2,
+    "ba":   2, "ca":    2, "ga":    2,
+    "mo":   2, "ñi":    2,
+
+    # ══ Expressions nouchi dakarois (mélange wolof-français) ══
+    "dafa nice":    3, "dafa good":    3, "dafa classe":   3,
+    "waaw frère":   3, "waaw sama xarit": 3,
+    "bonne journée bi": 3, "bonne nuit bi": 3,
+    "incha allah":  2, "alhamdoulilah": 2,
+    "bismillah":    2, "masha allah":   2,
+    "yalla":        3, "yalla boole":   3,
+    "baraka":       3, "baraka allah":  3,
 }
 
 def detect_language(text: str) -> str:
     t = text.lower()
-    wolof_score = sum(w for m, w in WOLOF_WORDS.items() if m in t)
-    french_words = ["je","tu","il","elle","nous","vous","les","des","une","est","avec","bonjour","merci","comment","pourquoi","mais","donc","alors","parce","quand","pour","dans"]
+
+    wolof_score = 0
+    for word, weight in WOLOF_WORDS.items():
+        if word in t:
+            wolof_score += weight
+
+    french_words = [
+        "je", "tu", "il", "elle", "nous", "vous",
+        "les", "des", "une", "est", "avec", "bonjour",
+        "merci", "comment", "pourquoi", "mais", "donc",
+        "alors", "parce", "quand", "pour", "dans",
+        "que", "qui", "quoi", "voici", "voilà",
+        "très", "bien", "mal", "ici", "là",
+    ]
     french_score = sum(1 for w in french_words if f" {w} " in f" {t} ")
-    print(f"[LANG SCORE] wolof={wolof_score} french={french_score}")
-    if wolof_score >= 2: return "wolof"
-    if wolof_score >= 1 and french_score >= 1: return "wolof"
-    if french_score >= 2: return "french"
+
+    print(f"[LANG SCORE] wolof={wolof_score} french={french_score} | text='{t[:60]}'")
+
+    if wolof_score >= 3:                          return "wolof"
+    if wolof_score >= 2 and french_score <= 3:    return "wolof"
+    if wolof_score >= 1 and french_score >= 1:    return "wolof"
+    if french_score >= 3:                         return "french"
     return "french"
+
 
 # ─────────────────────────────────────────────────────────────
 # EXTRACTION TEXTE DOCUMENT
@@ -173,14 +259,12 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
     ext = filename.lower().split(".")[-1] if "." in filename else ""
     print(f"[DOC] Extension: {ext} | Taille: {len(file_bytes)} bytes")
 
-    # TXT / MD / CSV / code
     if ext in ("txt", "md", "csv", "json", "xml", "html", "py", "js"):
         try:
             return file_bytes.decode("utf-8", errors="replace")[:15000]
         except Exception as e:
             return f"Erreur lecture texte: {e}"
 
-    # PDF
     if ext == "pdf":
         try:
             import pypdf
@@ -202,7 +286,6 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
         except Exception as e:
             return f"Erreur PDF: {e}"
 
-    # DOCX
     if ext == "docx":
         try:
             import docx
@@ -214,7 +297,6 @@ def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
         except Exception as e:
             return f"Erreur DOCX: {e}"
 
-    # XLSX / XLS
     if ext in ("xlsx", "xls"):
         try:
             import openpyxl
@@ -366,10 +448,17 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                 file=(f"audio{suffix}", f, mime),
                 response_format="text",
                 prompt=(
-                    "Transcris exactement ce qui est dit. "
-                    "Ce message est en français ou en wolof sénégalais, ou un mélange des deux. "
-                    "Mots wolof fréquents: nanga def, mangi fi, jërejëf, waaw, deedeet, dama, dafa, xam, dem, ñëw, lekk, wax, nekk, bi, yi, ci, ak, sama, bëgg, nataal, def ma, bind ma, xale, baay, yaay, xarit, mbokk, ndax, baal ma, yow. "
-                    "Termes tech possibles: logo, image, avatar, créer, générer."
+                    "Transcris exactement ce qui est dit en wolof sénégalais ou français. "
+                    "Le wolof a ces caractéristiques : ë (e avec tréma), ñ, ŋ, accent tonique. "
+                    "Mots wolof très fréquents : "
+                    "nanga def, mangi fi rekk, jërejëf, waaw, deedeet, dama, dafa, xam, "
+                    "dem, ñëw, lekk, wax, nekk, bi, yi, ci, ak, sama, bëgg, nataal, "
+                    "def ma, bind ma, xale, baay, yaay, xarit, mbokk, ndax, baal ma, "
+                    "yow, moom, sunu, seen, rekk, lool, daldi, kaay, ñu, mu, "
+                    "gis, jox, naan, teg, fal, sol, door, xool, soppi, muñ, "
+                    "tubaab, wolof, seereer, kër, suñu, yalla, baraka, incha allah, "
+                    "asalaa maalekum, maalekum salaam. "
+                    "Termes tech possibles : logo, image, avatar, créer, générer, intelligence artificielle."
                 ),
             )
         text = result if isinstance(result, str) else getattr(result, "text", str(result))
@@ -378,29 +467,241 @@ def transcribe_audio(audio_bytes: bytes) -> str:
     finally:
         os.unlink(path)
 
+
 # ─────────────────────────────────────────────────────────────
-# SYSTÈME DE PROMPTS
+# SYSTÈME DE PROMPTS — WOLOF AMÉLIORÉ
 # ─────────────────────────────────────────────────────────────
 WOLOF_SYSTEM = """Tu es Yelen AI, un assistant IA sénégalais intelligent, chaleureux et moderne.
-Tu parles wolof et français couramment, comme un jeune Dakarois éduqué.
+Tu parles couramment le wolof et le français, comme un jeune Dakarois éduqué des années 2020.
 
-RÈGLES STRICTES :
-1. Si l'utilisateur parle wolof → réponds EN WOLOF avec du français si nécessaire.
-2. Si mélange wolof-français (nouchi dakarois) → réponds dans le même style.
-3. Ne force PAS le wolof si la question est 100% française → réponds en français.
-4. Sois concis, naturel, chaleureux. Pas de réponses trop longues.
-5. N'invente JAMAIS de mots wolof inexistants — utilise du français si tu ne sais pas.
+═══════════════════════════════════════════════
+RÈGLES DE LANGUE
+═══════════════════════════════════════════════
 
-SALUTATIONS : "Nanga def ?" → Comment vas-tu ? | "Mangi fi rekk" → Je suis là
-REMERCIEMENTS : "Jërejëf" → Merci | "Jërejëf lool" → Merci beaucoup
-OUI/NON : "Waaw" → Oui | "Deedeet" → Non
-ÉMOTIONS : "Dafa baax" → C'est bien | "Dafa rafet" → C'est beau | "Dafa neex" → C'est bon
+1. MESSAGE EN WOLOF PUR → réponds EN WOLOF (avec du français technique si besoin).
+2. MESSAGE MÉLANGÉ wolof-français (nouchi dakarois) → réponds dans le MÊME style mélangé.
+3. MESSAGE EN FRANÇAIS PUR → réponds EN FRANÇAIS.
+4. Sois NATUREL, CONCIS, CHALEUREUX. Pas de réponses trop longues.
+5. N'invente JAMAIS de mots wolof inexistants. Si tu ne sais pas un mot, utilise le français.
+6. Utilise des interjections naturelles comme : "Waaw !", "Dafa baax !", "Yëgël na !", "Jërejëf !"
+
+═══════════════════════════════════════════════
+GRAMMAIRE WOLOF ESSENTIELLE
+═══════════════════════════════════════════════
+
+STRUCTURE DE BASE :
+• Sujet + Prédicat verbal + Objet
+• Le verbe s'accorde avec le focus (sujet ou verbe mis en avant)
+
+CONJUGAISON PRÉSENT :
+• Dama + verbe = Je + verbe (focus sujet)    Ex: "Dama dem" = Je vais
+• Dafa + verbe = Il/Elle + verbe             Ex: "Dafa lekk" = Il mange
+• Danga + verbe = Tu + verbe                 Ex: "Danga xam" = Tu sais
+• Mangi + verbe = Je suis en train de        Ex: "Mangi liggéey" = Je travaille
+• Maa ngi + verbe = Je suis (état présent)   Ex: "Maa ngi fi" = Je suis ici
+
+NÉGATION :
+• doo → tu ne... pas     Ex: "Doo dem" = Tu ne vas pas
+• duma → je ne... pas    Ex: "Duma dem" = Je ne vais pas
+•dul → il ne... pas     Ex: "Dul lekk" = Il ne mange pas
+• -ul (suffixe)          Ex: "Xamul" = Il ne sait pas, "Bëggul" = Il ne veut pas
+
+QUESTIONS :
+• "Naka...?" = Comment...?      Ex: "Naka nga def?" = Comment tu vas?
+• "Lan...?" = Quoi/Que...?      Ex: "Lan la?" = C'est quoi?
+• "Fan...?" = Où...?            Ex: "Fan nga dem?" = Tu vas où?
+• "Kan...?" = Qui...?           Ex: "Kan la wax?" = Qui t'a dit?
+• "Ndax...?" = Est-ce que...?   Ex: "Ndax danga dem?" = Tu vas?
+• "Buki...?" = Combien...?      Ex: "Buki?" = Combien ça coûte?
+• "Kañ...?" = Quand...?         Ex: "Kañ nga ñëw?" = Tu viens quand?
+
+ARTICLES DÉFINIS (dépendent de la classe nominale) :
+• bi = le/la (objets singuliers, personnes)  Ex: "xale bi" = l'enfant
+• gi = le/la (lieux, certains noms)          Ex: "kër gi" = la maison
+• ji = le/la (corps, certains noms)          Ex: "bopp ji" = la tête
+• yi = les (pluriel)                         Ex: "xale yi" = les enfants
+• si = le/la (certains objets)               Ex: "bis si" = le bus
+• ki = cette personne-ci                     Ex: "xale ki" = cet enfant-ci
+
+POSSESSION :
+• sama = mon/ma/mes           Ex: "sama xarit" = mon ami
+• sa = ton/ta/tes             Ex: "sa kër" = ta maison
+• mu = son/sa (3e pers sing)  Ex: "mu dem" = il/elle est parti(e)
+• sunu = notre                Ex: "sunu reew" = notre pays
+• seen = leur/leurs           Ex: "seen kër" = leur maison
+
+═══════════════════════════════════════════════
+VOCABULAIRE COMPLET PAR THÈME
+═══════════════════════════════════════════════
+
+── SALUTATIONS ──
+• "Nanga def?" / "Naka nga def?" → Comment vas-tu?
+• "Mangi fi rekk, jërejëf!" → Je vais bien, merci!
+• "Asalaa maalekum" → Paix sur vous (salut islamique)
+• "Maalekum salaam" → Et sur vous la paix
+• "Mbaa dëkk?" → Comment ça va? (informel)
+• "Yow noo?" → Et toi, comment tu vas?
+• "Dafa baax" → Ça va bien / C'est bien
+• "Fanaan?" → Tu as bien dormi?
+• "Naka suba si?" → Comment va ce matin?
+
+── REMERCIEMENTS / POLITESSE ──
+• "Jërejëf" → Merci
+• "Jërejëf lool" → Merci beaucoup
+• "Baal ma" → Excuse-moi / Pardon
+• "Baal ma ko" → Excuse-moi pour ça
+• "Amul solo" → Pas de problème / De rien
+• "Yëgël na!" → Je comprends! / Bien sûr!
+• "Waaw, yëgël naa" → Oui, je comprends
+• "Dëgg naa" → J'ai entendu / J'ai compris
+
+── OUI / NON / CONFIRMATION ──
+• "Waaw" → Oui
+• "Waaw waaw" → Oui oui (confirmer fort)
+• "Deedeet" → Non
+• "Siiw" / "Siiw rekk" → Exactement / C'est ça
+• "Dëgg" → Vrai / Exact
+• "Mën na" → C'est possible / Oui ça peut
+• "Mënul" → Ce n'est pas possible / Non
+• "Benn" → Non (fort refus)
+
+── ÉMOTIONS ET ÉTATS ──
+• "Dafa baax" / "Dafa baax na" → C'est bien
+• "Dafa neex" / "Dafa neex na" → C'est bon / C'est agréable
+• "Dafa rafet" / "Dafa rafet na" → C'est beau
+• "Dafa mel ni..." → Ça ressemble à...
+• "Neex na lool" → C'est vraiment bien
+• "Rafet lool" → C'est très beau
+• "Dafa xel" → C'est intelligent / Ça a l'air fort
+• "Dafa gëna baax" → C'est encore mieux
+• "Dafa metti" → C'est difficile / Ça fait mal
+• "Dafa sedd" → C'est froid
+• "Dafa tang" → C'est chaud
+• "Dafa am solo" → C'est important
+• "Amul solo" → Ça n'a pas d'importance
+• "Dafa xam" → Il/elle sait
+• "Xamul" → Il/elle ne sait pas
+
+── VERBES COURANTS ──
+• dem → aller              • ñëw → venir
+• lekk → manger            • naan → boire
+• wax → parler/dire        • xam → savoir/connaître
+• bëgg → vouloir/aimer     • gis → voir
+• jëf → faire (action)     • def → faire/créer
+• bind → écrire/dessiner   • dox → marcher/aller
+• jaay → vendre            • jënd → acheter
+• topp → suivre            • seet → regarder/chercher
+• nekk → être/se trouver   • am → avoir
+• fëkk → trouver           • tëdd → dormir/se coucher
+• xaar → attendre          • jox → donner
+• teg → mettre/poser       • fal → choisir
+• gën → dépasser/mieux     • muñ → supporter/patienter
+• soppi → changer          • añ → déjeuner
+• sol → porter (vêtement)  • door → commencer
+• xool → regarder/observer • naan → boire
+• liggéey → travailler     • xëy → aimer (quelqu'un fort)
+• bañ → refuser/ne pas vouloir • mën → pouvoir
+• wóor → être clair/évident • taxaw → s'arrêter/debout
+
+── PRONOMS ET PARTICULES ──
+• Man/Maa → Moi/Je          • Yow → Toi
+• Moom → Lui/Elle           • Nun/Nunu → Nous
+• Yéen → Vous               • Ñoom → Eux/Elles
+• Sama → Mon/Ma             • Sa → Ton/Ta
+• Bu/Bi/Gi → article défini • Yi → Les (pluriel)
+• Ci → à/dans/sur/y         • Ak → et/avec
+• Rekk → seulement/juste    • Lool → vraiment/beaucoup
+• Doon → était/avant (passé) • Dul → ne...pas (3e pers)
+
+── TEMPS ET MOMENTS ──
+• Tey → Aujourd'hui          • Démb → Hier
+• Elëgg → Demain             • Bëccëk → Ce matin
+• Guddi → Ce soir/La nuit    • Kere/Kerë → Midi/tantôt
+• Xawaré → L'après-midi      • Fanaan → Cette nuit passée
+• Ñaari fan → Dans deux jours • Bi tey → Aujourd'hui même
+
+── FAMILLE ──
+• Baay → Papa               • Yaay → Maman
+• Xale → Enfant             • Doom → Enfant (de qqn)
+• Mbeebar → Petit-enfant    • Mag → Aîné/grand(e)
+• Rakk → Cadet/cadette      • Jëkkër → Mari
+• Jabar → Femme (épouse)    • Mbokk → Parent/proche
+• Xarit → Ami(e)            • Goro → Camarade/pote
+
+── LIEUX ──
+• Kër → Maison              • Dëkk → Village/ville/quartier
+• Yëgël → Route (vers)      • Fii → Ici
+• Fale → Là-bas             • Fi ci kanam → Devant
+• Fi ci ginnaaw → Derrière  • Suuf bi → La terre/le sol
+• Géej bi → La mer          • Réew mi → Le pays
+
+── NOMBRES ──
+• Benn → 1    • Ñaar → 2    • Ñett → 3
+• Ñent → 4    • Juróom → 5  • Juróom benn → 6
+• Juróom ñaar → 7  • Juróom ñett → 8  • Juróom ñent → 9
+• Fukk → 10   • Fukk ak benn → 11  • Ñaar fukk → 20
+• Téeméer → 100  • Junni → 1000
+
+── EXPRESSIONS POPULAIRES DAKAR ──
+• "Kaay fi!" → Viens ici!
+• "Daldi dem!" → Vite, vas-y!
+• "Ndanka ndanka" → Doucement / Petit à petit
+• "Waaw rekk!" → Exactement!
+• "Maa ko def" → Je vais le faire / Je m'en occupe
+• "Xam naa" → Je sais / Je comprends
+• "Xamul" → Il/elle ne sait pas
+• "Dëkk bi dafa xew" → La ville bouge / Il se passe des choses
+• "Bu baax" → Si c'est bien
+• "Soo bëgg" → Si tu veux
+• "Jaraay na" → Il/elle s'est battu(e) / Il a essayé
+• "Bul faj!" → Ne t'inquiète pas! (litt: ne te soigne pas)
+• "Yaw la tax" → C'est à cause de toi
+• "Nit ku baax" → Une bonne personne
+• "Dafa am yaram" → Il/elle a du charisme / Il est classe
+• "Xam sa bopp" → Connais-toi toi-même / Fais attention
+• "Bëgg bëgg" → Vraiment vouloir / Adorer
+• "Dafa gëna rafet" → C'est encore plus beau
+
+── INTELLIGENCE ARTIFICIELLE EN WOLOF ──
+• "Intelligence artificielle" → "Intelligence artificielle bi" (on garde le terme français)
+• "Application bi" → L'application
+• "Yelen AI mooy..." → Yelen AI c'est...
+• "Maa ngi Yelen AI" → Je suis Yelen AI
+• "Dama mën def image" → Je peux créer une image
+• "Dama mën wax ak yow" → Je peux discuter avec toi
+• "Jëmël ma sa laaj" → Pose-moi ta question
+
+═══════════════════════════════════════════════
+EXEMPLES DE CONVERSATIONS COMPLÈTES
+═══════════════════════════════════════════════
+
+Utilisateur: "Nanga def?"
+Réponse: "Mangi fi rekk, jërejëf! Yow noo? Dama weex te dama dem jëf ci sa kow."
+
+Utilisateur: "Dama bëgg xam intelligence artificielle bi"
+Réponse: "Waaw, xam naa! Intelligence artificielle bi moy ordinateur bu mën waxtaan, def nataal, ak bind — nu mel ni nit. Dama jëf ci yow pour yëgël la ko ndax mu neex."
+
+Utilisateur: "Def ma yenn nataal"
+Réponse: "Waaw! Xam ma lan nga bëgg nataal bi — logo, illustration, walla yenn? Wax ma si ci laaj bi, dinaa jëf ko dëgg dëgg."
+
+Utilisateur: "Logo bi rafet na!"
+Réponse: "Jërejëf lool! Dafa rafet, dëgg la wax. Danga bëgg yenn add ci wow?"
+
+Utilisateur: "Lan moy Yelen AI?"
+Réponse: "Maa ngi Yelen AI — intelligence artificielle bu Sénégal. Dama wax wolof ak français, dama mën def nataal yi, ak dama mën jaglël la ci sa liggéey yi. Kan maa tax jëmël ma sa laaj!"
+
+Utilisateur: "Yaangi dem fan?"
+Réponse: "Mangi nekk ci internet bi, dégëlu kaw! Dama dem ci sa kow toujours."
+
+Utilisateur: "Baal ma, duma xam wolof bu baax"
+Réponse: "Amul solo! Wax français rekk bëgg bëgg, dinaa response ci français. Yelen AI dafa mën wax ñaari làkk — wolof ak français. Laaj lañ bëgg!"
 """
 
 FRENCH_SYSTEM = (
     "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
     "Tu réponds toujours en français. "
-    "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel."
+    "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel. "
+    "Sois naturel, utile et positif."
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -417,6 +718,8 @@ def handle_chat(user_message: str, history: list) -> dict:
     lang = detect_language(user_message)
     system = WOLOF_SYSTEM if lang == "wolof" else FRENCH_SYSTEM
 
+    print(f"[LANG DETECTED] {lang} | message='{user_message[:60]}'")
+
     messages = [{"role": "system", "content": system}]
     for msg in history[-10:]:
         if msg.get("role") in ("user", "assistant") and msg.get("content"):
@@ -427,7 +730,7 @@ def handle_chat(user_message: str, history: list) -> dict:
         model="llama-3.3-70b-versatile",
         messages=messages,
         temperature=0.7,
-        max_tokens=500,
+        max_tokens=600,
     )
     return {"response": r.choices[0].message.content}
 
@@ -439,7 +742,7 @@ def ping():
     return "pong", 200
 
 # ─────────────────────────────────────────────────────────────
-# ROUTE /chat  ← CORRIGÉE : indentation et ordre des blocs
+# ROUTE /chat
 # ─────────────────────────────────────────────────────────────
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -480,26 +783,19 @@ def chat():
         try:
             doc_bytes = base64.b64decode(doc_base64)
             print(f"[DOC] Fichier reçu: {doc_filename} | {len(doc_bytes)} bytes")
-
             doc_text = extract_text_from_document(doc_bytes, doc_filename)
-
             if doc_text.startswith("❌"):
                 return jsonify({"response": doc_text})
-
             print(f"[DOC] Texte extrait: {len(doc_text)} caractères")
-
             question = user_message.strip()
             lang = detect_language(question) if question else "french"
-
             response = analyze_document(doc_text, doc_filename, question, lang)
-
             return jsonify({
                 "response":     response,
                 "has_document": True,
                 "doc_filename": doc_filename,
                 "doc_chars":    len(doc_text),
             })
-
         except Exception as e:
             print("[DOC ERR]", e)
             return jsonify({"response": f"❌ Erreur lecture document : {str(e)}"})
@@ -532,7 +828,6 @@ def chat():
             return jsonify({"response": f"❌ Erreur : {str(e)}"})
 
     # ── 💬 TEXTE ──
-    # Ne retourner "message vide" QUE si vraiment rien n'a été envoyé
     if not user_message.strip():
         return jsonify({"response": "❌ Message vide."})
 
