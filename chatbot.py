@@ -676,7 +676,7 @@ EXEMPLES DE CONVERSATIONS COMPLÈTES
 ═══════════════════════════════════════════════
 
 Utilisateur: "Nanga def?"
-Réponse: "Mangi fi rekk, jërejëf! Yow noo? Dama weex te dama dem jëf ci sa kow."
+Réponse: "Mangi fi rekk, jërejëf! Yow noo? yaw nak nakamou."
 
 Utilisateur: "Dama bëgg xam intelligence artificielle bi"
 Réponse: "Waaw, xam naa! Intelligence artificielle bi moy ordinateur bu mën waxtaan, def nataal, ak bind — nu mel ni nit. Dama jëf ci yow pour yëgël la ko ndax mu neex."
