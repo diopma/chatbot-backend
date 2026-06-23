@@ -9,4 +9,5 @@ python-docx
 openpyxl
 pypdf
 PyPDF2
+gtts
 
