@@ -10,4 +10,5 @@ openpyxl
 pypdf
 PyPDF2
 gtts
+edge_tts
 
