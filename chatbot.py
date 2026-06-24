@@ -3,6 +3,7 @@ import base64
 import tempfile
 import urllib.parse
 import requests
+import io
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -10,6 +11,7 @@ from groq import Groq
 from gtts import gTTS
 import asyncio
 import edge_tts
+from pypdf import PdfReader
 
 app = Flask(__name__)
 CORS(app)
@@ -97,6 +99,114 @@ def generate_image(prompt: str, gen_type: str):
         return base64.b64encode(res.content).decode()
     except Exception as e:
         print("[IMAGE ERROR]", e)
+        return None
+
+# ─────────────────────────────────────────────
+# IMAGE VISION (analyse d'une image envoyée par l'utilisateur)
+# ─────────────────────────────────────────────
+def _detect_image_mime(raw_bytes: bytes) -> str:
+    """Détecte le type MIME réel à partir des premiers octets (signature de fichier)."""
+    if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw_bytes.startswith(b"GIF87a") or raw_bytes.startswith(b"GIF89a"):
+        return "image/gif"
+    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    # Par défaut : jpeg (format le plus courant depuis les galeries mobiles)
+    return "image/jpeg"
+
+
+def analyze_image_base64(image_base64: str, question: str):
+    """
+    Envoie l'image (base64) + une question à un modèle vision via Groq
+    (Llama 4 Scout) et retourne la réponse texte du modèle, ou None en
+    cas d'échec.
+    """
+    try:
+        raw_bytes = base64.b64decode(image_base64)
+        mime = _detect_image_mime(raw_bytes)
+        data_url = f"data:{mime};base64,{image_base64}"
+        r = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            temperature=0.5,
+            max_tokens=600,
+        )
+        return r.choices[0].message.content
+    except Exception as e:
+        print("[VISION ERROR]", e)
+        return None
+
+# ─────────────────────────────────────────────
+# DOCUMENT (extraction + analyse de PDF)
+# ─────────────────────────────────────────────
+MAX_DOC_CHARS = 15000  # limite de texte envoyée au LLM pour rester dans le contexte
+
+def extract_pdf_text(pdf_base64: str):
+    """
+    Décode un PDF en base64 et en extrait le texte (toutes pages, tronqué
+    si trop long). Retourne (texte, erreur) ; texte est None si l'extraction
+    échoue (PDF scanné sans texte, fichier corrompu, etc.).
+    """
+    try:
+        raw_bytes = base64.b64decode(pdf_base64)
+        reader = PdfReader(io.BytesIO(raw_bytes))
+
+        if reader.is_encrypted:
+            return None, "Le PDF est protégé par mot de passe."
+
+        pages_text = []
+        for page in reader.pages:
+            try:
+                pages_text.append(page.extract_text() or "")
+            except Exception:
+                continue
+
+        full_text = "\n\n".join(t for t in pages_text if t.strip())
+
+        if not full_text.strip():
+            return None, "Aucun texte détecté (le PDF est probablement une image scannée)."
+
+        if len(full_text) > MAX_DOC_CHARS:
+            full_text = full_text[:MAX_DOC_CHARS] + "\n\n[...document tronqué, trop long...]"
+
+        return full_text, None
+
+    except Exception as e:
+        print("[PDF ERROR]", e)
+        return None, f"Impossible de lire ce PDF : {e}"
+
+
+def analyze_document(doc_text: str, question: str):
+    """Envoie le texte extrait du document + la question de l'utilisateur au LLM."""
+    try:
+        prompt = (
+            "Voici le contenu d'un document fourni par l'utilisateur :\n\n"
+            f"---\n{doc_text}\n---\n\n"
+            f"Question de l'utilisateur : {question}"
+        )
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+            max_tokens=700,
+        )
+        return r.choices[0].message.content
+    except Exception as e:
+        print("[DOC ANALYSIS ERROR]", e)
         return None
 
 # ─────────────────────────────────────────────
@@ -306,7 +416,51 @@ def chat():
 
     has_audio = bool(data.get("has_audio"))
     audio_base64 = data.get("audio_base64")
+    has_image = bool(data.get("has_image"))
+    image_base64 = data.get("image_base64")
+    has_document = bool(data.get("has_document"))
+    document_base64 = data.get("document_base64")
     history = data.get("history", [])
+
+    # ── Cas document : extraction texte + analyse, pas besoin de passer par handle_chat ──
+    if has_document:
+        if not document_base64:
+            return jsonify({"error": "document manquant"}), 400
+
+        doc_text, doc_error = extract_pdf_text(document_base64)
+
+        if not doc_text:
+            return jsonify({
+                "error": doc_error or "Impossible de lire ce document",
+                "response": f"❌ {doc_error or 'Je n’ai pas pu lire ce document.'}",
+            }), 200
+
+        question = (data.get("message") or "Résume ce document en français.").strip()
+        response_text = analyze_document(doc_text, question)
+
+        if not response_text:
+            return jsonify({
+                "error": "Impossible d'analyser le document",
+                "response": "❌ Je n'ai pas réussi à analyser ce document, réessaie.",
+            }), 200
+
+        return jsonify({"response": response_text})
+
+    # ── Cas image : analyse vision directe, pas besoin de passer par handle_chat ──
+    if has_image:
+        if not image_base64:
+            return jsonify({"error": "image manquante"}), 400
+
+        question = (data.get("message") or "Décris cette image en détail en français.").strip()
+        response_text = analyze_image_base64(image_base64, question)
+
+        if not response_text:
+            return jsonify({
+                "error": "Impossible d'analyser l'image",
+                "response": "❌ Je n'ai pas réussi à analyser cette image, réessaie.",
+            }), 200
+
+        return jsonify({"response": response_text})
 
     transcription = None
 
