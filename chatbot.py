@@ -8,6 +8,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
 from gtts import gTTS
+import asyncio
+import edge_tts
 
 app = Flask(__name__)
 CORS(app)
@@ -63,13 +65,23 @@ def detect_image_intent(msg: str):
     }
 
 # ─────────────────────────────────────────────
-# LANGUAGE DETECTION
+# LANGUAGE / SYSTEM PROMPT
 # ─────────────────────────────────────────────
-def detect_language(text: str) -> str:
-    wolof_keywords = ["nanga", "mangi", "dafa", "wolof", "jërejëf"]
-    if any(w in text.lower() for w in wolof_keywords):
-        return "wolof"
-    return "french"
+# Plutôt qu'une détection par mots-clés (peu fiable : la plupart des phrases
+# en wolof ne contiennent aucun des mots-clés type "nanga"/"mangi"/...), on
+# laisse le LLM identifier lui-même la langue du message et y répondre.
+# Llama 3.3 a une connaissance limitée du wolof (langue peu présente dans
+# les corpus d'entraînement) mais fait un effort correct en best-effort.
+SYSTEM_PROMPT = (
+    "Tu es Yelen AI, un assistant qui parle français et wolof.\n"
+    "Détecte automatiquement la langue du message de l'utilisateur "
+    "(français ou wolof) et réponds TOUJOURS dans cette même langue.\n"
+    "Si l'utilisateur écrit en wolof, fais de ton mieux pour répondre "
+    "entièrement en wolof, même si ta maîtrise du wolof est imparfaite : "
+    "ne bascule pas en français sauf si l'utilisateur te le demande "
+    "explicitement ou s'il mélange lui-même les deux langues.\n"
+    "Si l'utilisateur écrit en français, réponds en français."
+)
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -90,26 +102,89 @@ def generate_image(prompt: str, gen_type: str):
 # ─────────────────────────────────────────────
 # TEXT TO SPEECH
 # ─────────────────────────────────────────────
-def text_to_speech_base64(text: str, lang: str = "fr"):
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-            tmp_path = tmp.name
-        tts = gTTS(text=text, lang=lang)
-        tts.save(tmp_path)
+def _edge_tts_sync(text: str, voice: str, out_path: str):
+    """Wrapper synchrone pour edge_tts (lib asyncio)."""
+    async def _run():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(out_path)
+    asyncio.run(_run())
 
-        with open(tmp_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
 
-    except Exception as e:
-        print("[TTS ERROR]", e)
-        return None
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+def text_to_speech_base64(text: str, lang: str = "fr", max_retries: int = 2):
+    """
+    Génère un mp3 de la réponse.
+
+    Priorité 1 : edge-tts — s'appuie sur l'infrastructure officielle de
+    synthèse vocale de Microsoft Edge (Read Aloud), beaucoup plus stable
+    en environnement serveur/cloud que gTTS.
+
+    Priorité 2 (fallback) : gTTS — endpoint non-officiel de Google
+    Translate ; peut renvoyer 403/429 selon l'IP sortante de l'hébergeur
+    (observé sur certaines IP partagées de type Render).
+
+    Retourne (audio_base64, message_erreur). message_erreur est None en
+    cas de succès, sinon contient le détail des deux échecs pour debug
+    direct dans les logs serveur / réponse JSON.
+    """
+    voice = "fr-FR-DeniseNeural"
+    errors = []
+
+    # ── Tentative 1 : edge-tts ──
+    for attempt in range(max_retries + 1):
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            _edge_tts_sync(text, voice, tmp_path)
+
+            with open(tmp_path, "rb") as f:
+                audio_bytes = f.read()
+
+            if not audio_bytes:
+                raise ValueError("fichier audio vide généré par edge-tts")
+
+            return base64.b64encode(audio_bytes).decode(), None
+
+        except Exception as e:
+            err = f"edge-tts tentative {attempt + 1}: {type(e).__name__}: {e}"
+            print("[TTS ERROR]", err)
+            errors.append(err)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    # ── Tentative 2 (fallback) : gTTS ──
+    for attempt in range(max_retries + 1):
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            tts = gTTS(text=text, lang=lang)
+            tts.save(tmp_path)
+
+            with open(tmp_path, "rb") as f:
+                audio_bytes = f.read()
+
+            if not audio_bytes:
+                raise ValueError("fichier audio vide généré par gTTS")
+
+            return base64.b64encode(audio_bytes).decode(), None
+
+        except Exception as e:
+            err = f"gTTS tentative {attempt + 1}: {type(e).__name__}: {e}"
+            print("[TTS ERROR]", err)
+            errors.append(err)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    return None, " | ".join(errors)
 
 # ─────────────────────────────────────────────
 # SPEECH TO TEXT (Whisper via Groq)
@@ -167,10 +242,7 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
             "visual_prompt": intent["visual_prompt"],
         }
 
-    lang = detect_language(user_message)
-    system = "Tu es un assistant wolof/français." if lang == "wolof" else "You are a French assistant."
-
-    messages = [{"role": "system", "content": system}]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += history[-10:]
     messages.append({"role": "user", "content": user_message})
 
@@ -189,8 +261,12 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     # (ex: l'utilisateur a envoyé un vocal) pour ne pas surcharger
     # inutilement les requêtes texte classiques si besoin de couper ce comportement.
     if want_audio_response:
-        audio_b64 = text_to_speech_base64(response_text, lang="fr" if lang != "wolof" else "fr")
+        audio_b64, tts_error = text_to_speech_base64(response_text)
         result["audio_base64"] = audio_b64
+        if tts_error:
+            # Visible dans les logs Render ET dans la réponse, pour debug rapide.
+            print("[TTS] échec définitif après retries :", tts_error)
+            result["tts_error"] = tts_error
 
     return result
 
@@ -200,6 +276,29 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
 @app.route("/ping")
 def ping():
     return "pong"
+
+@app.route("/tts", methods=["POST"])
+def tts():
+    """
+    Génère l'audio d'un texte à la demande (bouton "écouter" sur un message
+    bot déjà affiché). Le texte est fourni par le client — pas besoin de
+    repasser par le LLM, on synthétise directement.
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+
+    if not text:
+        return jsonify({"error": "texte manquant"}), 400
+
+    if len(text) > 4000:
+        text = text[:4000]
+
+    audio_b64, tts_error = text_to_speech_base64(text)
+
+    if not audio_b64:
+        return jsonify({"error": tts_error or "échec de la synthèse vocale"}), 502
+
+    return jsonify({"audio_base64": audio_b64})
 
 @app.route("/chat", methods=["POST"])
 def chat():
