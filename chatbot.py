@@ -108,7 +108,7 @@ pour la traduction — respecte cette terminologie plutôt que d'improviser) :
 
 Salutations / politesse :
 - Nanga def / Na nga def = Comment vas-tu / Comment ça va
-- Maa ngi fi (rekk) = Je vais bien (ça va)
+- Maa ngi fi yagui thi diam (rekk) = Je vais bien (ça va)
 - Jërejëf = Merci
 - Amul solo = De rien / Ce n'est rien
 - Baal ma = Excuse-moi / Pardon
@@ -158,6 +158,8 @@ Verbes / expressions utiles pour un assistant :
 - Démb = Hier
 - Su fekkee = Si (condition)
 - Bu bëgge = Si tu veux
+- defal ma = créer
+- bakhoul = c'est pas bon
 """.strip()
 
 
@@ -182,7 +184,7 @@ def detect_wolof(text: str) -> bool:
         "jàng", "jang", "yëg", "yeg", "bul jaaxle", "léegi", "leegi",
         "tey", "ëllëg", "ellëg", "ellek", "démb", "demb", "baal ma",
         "mangi", "maa ngi", "xam naa", "xamuma", "mën naa", "menna",
-        "baax na",
+        "baax na","defal ma","bakhoul"
     ]
 
     lowered = text.lower()
