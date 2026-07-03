@@ -1,7 +1,4 @@
 import os
-import re
-import json
-import threading
 import base64
 import tempfile
 import urllib.parse
@@ -72,6 +69,11 @@ def detect_image_intent(msg: str):
 # ─────────────────────────────────────────────
 # LANGUAGE / SYSTEM PROMPT
 # ─────────────────────────────────────────────
+# Plutôt qu'une détection par mots-clés (peu fiable : la plupart des phrases
+# en wolof ne contiennent aucun des mots-clés type "nanga"/"mangi"/...), on
+# laisse le LLM identifier lui-même la langue du message et y répondre.
+# Llama 3.3 a une connaissance limitée du wolof (langue peu présente dans
+# les corpus d'entraînement) mais fait un effort correct en best-effort.
 SYSTEM_PROMPT = (
     "Tu es Yelen AI, un assistant qui parle français et wolof.\n"
     "Détecte automatiquement la langue du message de l'utilisateur "
@@ -82,306 +84,6 @@ SYSTEM_PROMPT = (
     "explicitement ou s'il mélange lui-même les deux langues.\n"
     "Si l'utilisateur écrit en français, réponds en français."
 )
-
-# ─────────────────────────────────────────────
-# WOLOF : GLOSSAIRE + TRADUCTION "SANDWICH"
-# ─────────────────────────────────────────────
-# Llama 3.3 a une connaissance très limitée du wolof (corpus d'entraînement
-# quasi inexistant pour cette langue), donc :
-#   1) il comprend mal certains mots/expressions wolof envoyés par
-#      l'utilisateur (contresens, incompréhension totale)
-#   2) il génère un wolof approximatif, mélangé de français, avec un
-#      vocabulaire parfois inventé
-#
-# Stratégie retenue : "traduction sandwich"
-#   wolof (utilisateur) --[traduction guidée par glossaire]--> français
-#   --[LLM répond normalement en français, tâche qu'il maîtrise bien]-->
-#   français --[traduction guidée par glossaire]--> wolof (réponse finale)
-#
-# Une tâche de TRADUCTION (contrainte, avec du contexte lexical fourni)
-# est beaucoup plus fiable pour un LLM qu'une GÉNÉRATION libre dans une
-# langue peu représentée dans son corpus. On combine ça avec un glossaire
-# bilingue injecté dans le prompt pour forcer un vocabulaire correct et
-# cohérent des deux côtés (compréhension ET génération).
-
-WOLOF_FR_GLOSSARY = """
-Glossaire wolof ↔ français (vocabulaire courant, à utiliser en priorité
-pour la traduction — respecte cette terminologie plutôt que d'improviser) :
-
-Salutations / politesse :
-- Nanga def / Na nga def = Comment vas-tu / Comment ça va
-- Maa ngi fi (rekk) = Je vais bien (ça va)
-- Jërejëf = Merci
-- Amul solo = De rien / Ce n'est rien
-- Baal ma = Excuse-moi / Pardon
-- Ba beneen = À bientôt / Au revoir
-
-Oui / non / affirmations :
-- Waaw = Oui
-- Déedéet = Non
-- Dara = Rien
-- Baax na = D'accord / C'est bien
-- Xam naa = Je sais
-- Xamuma = Je ne sais pas
-- Mën naa = Je peux
-- Mënuma = Je ne peux pas
-
-Mots interrogatifs :
-- Naka = Comment
-- Lan / Lu = Quoi
-- Ndax = Est-ce que
-- Lu tax = Pourquoi
-- Fan / Ana = Où
-- Kañ = Quand
-- Kan = Qui
-- Ñaata = Combien
-
-Pronoms / personnes :
-- Man = Moi
-- Yow = Toi
-- Moom = Lui / Elle
-- Nun = Nous
-- Yeen = Vous
-- Ñoom = Eux
-
-Verbes / expressions utiles pour un assistant :
-- Dama bëgg / Da nga bëgg = Je veux / Tu veux
-- Dinaa (+ verbe) = Je vais (futur proche)
-- Wax = Parler / Dire
-- Dégg = Comprendre / Entendre
-- Xool = Regarder
-- Bind = Écrire
-- Jàng = Lire / Étudier
-- Yëg = Ressentir / Faire savoir
-- Bul jaaxle = Ne t'inquiète pas
-- Léegi = Maintenant
-- Tey = Aujourd'hui
-- Ëllëg = Demain
-- Démb = Hier
-- Su fekkee = Si (condition)
-- Bu bëgge = Si tu veux
-""".strip()
-
-
-# ─────────────────────────────────────────────
-# GLOSSAIRE APPRIS EN CONVERSATION (mémoire persistante)
-# ─────────────────────────────────────────────
-# Quand l'utilisateur enseigne un mot ("X veut dire Y"), on le sauvegarde
-# ici pour que le bot s'en souvienne dans les conversations futures — pas
-# seulement dans l'historique de la conversation en cours (le modèle n'a
-# aucune mémoire entre les requêtes HTTP).
-#
-# NB : c'est un glossaire GLOBAL (partagé entre tous les utilisateurs), il
-# n'y a pas de notion d'utilisateur/session dans cette API pour l'instant.
-# NB2 : sur un hébergeur avec disque éphémère (ex. Render free tier), ce
-# fichier peut être réinitialisé à chaque redéploiement — pour une mémoire
-# vraiment durable il faudrait une vraie base de données.
-LEARNED_GLOSSARY_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "learned_glossary.json"
-)
-_glossary_lock = threading.Lock()
-
-
-def _load_learned_glossary() -> dict:
-    try:
-        with open(LEARNED_GLOSSARY_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save_learned_glossary(data: dict):
-    tmp_path = LEARNED_GLOSSARY_PATH + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, LEARNED_GLOSSARY_PATH)
-
-
-def add_learned_words(pairs: list) -> list:
-    """
-    Ajoute une liste de {"wolof": ..., "french": ...} au glossaire appris.
-    Retourne la liste des paires effectivement ajoutées/mises à jour.
-    """
-    added = []
-    with _glossary_lock:
-        current = _load_learned_glossary()
-        for pair in pairs:
-            wl = (pair.get("wolof") or "").strip()
-            fr = (pair.get("french") or "").strip()
-            if not wl or not fr:
-                continue
-            current[wl.lower()] = {"wolof": wl, "french": fr}
-            added.append({"wolof": wl, "french": fr})
-        if added:
-            _save_learned_glossary(current)
-    return added
-
-
-def get_full_glossary_text() -> str:
-    """Glossaire statique + mots appris en conversation, prêt pour un prompt."""
-    learned = _load_learned_glossary()
-    if not learned:
-        return WOLOF_FR_GLOSSARY
-    learned_lines = "\n".join(
-        f"- {v['wolof']} = {v['french']}" for v in learned.values()
-    )
-    return (
-        f"{WOLOF_FR_GLOSSARY}\n\n"
-        "Mots appris récemment auprès de l'utilisateur (prioritaires, "
-        "à utiliser tels quels) :\n"
-        f"{learned_lines}"
-    )
-
-
-def get_learned_words() -> set:
-    return set(_load_learned_glossary().keys())
-
-
-# ─────────────────────────────────────────────
-# DÉTECTION D'UN MESSAGE "ENSEIGNEMENT" (l'utilisateur apprend un mot au bot)
-# ─────────────────────────────────────────────
-TEACHING_MARKERS = [
-    "veut dire", "ça veut dire", "ca veut dire", "veux dire",
-    "signifie", "sinifie", "ce qui veut dire", "mooy", " = ",
-    "retiens que", "retiens ça", "apprends", "en wolof on dit",
-    "en wolof ça dit", "ça se dit",
-]
-
-
-def looks_like_teaching(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(m in lowered for m in TEACHING_MARKERS)
-
-
-def extract_taught_pairs(text: str):
-    """
-    Utilise le LLM pour extraire les paires wolof/français que l'utilisateur
-    est en train d'enseigner dans son message (ex: "Jamm veut dire paix").
-    Retourne une liste de {"wolof":..., "french":...} (peut être vide).
-    Appelé uniquement quand looks_like_teaching() a déjà pré-filtré, pour
-    limiter les appels API inutiles.
-    """
-    instruction = (
-        "L'utilisateur est en train d'apprendre du vocabulaire wolof à un "
-        "assistant. Extrais toutes les paires mot/expression-wolof et "
-        "leur traduction française présentes dans son message.\n"
-        "Réponds STRICTEMENT avec un tableau JSON, sans aucun texte "
-        "autour, sans balises markdown, au format exact :\n"
-        '[{"wolof": "...", "french": "..."}]\n'
-        "Si aucune paire d'enseignement claire n'est présente, réponds : []"
-    )
-    try:
-        r = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": instruction},
-                {"role": "user", "content": text},
-            ],
-            temperature=0,
-            max_tokens=400,
-        )
-        raw = (r.choices[0].message.content or "").strip()
-        raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-        parsed = json.loads(raw)
-        if isinstance(parsed, list):
-            return [p for p in parsed if isinstance(p, dict)]
-        return []
-    except Exception as e:
-        print("[TEACHING EXTRACT ERROR]", e)
-        return []
-
-
-def detect_wolof(text: str) -> bool:
-    """
-    Heuristique locale (rapide, sans appel API) pour repérer un message
-    probablement écrit en wolof, en cherchant des marqueurs très fréquents
-    (mots-outils, pronoms, interrogatifs) plutôt qu'un mot-clé isolé — plus
-    fiable que l'ancienne approche par mots-clés ponctuels.
-    Ce n'est qu'un pré-filtre : en cas de doute on part du principe que
-    c'est du français, et le SYSTEM_PROMPT sert de filet de sécurité pour
-    les cas mixtes ou mal détectés.
-    """
-    if not text:
-        return False
-
-    markers = [
-        "nanga", "def", "jërejëf", "jerejef", "waaw", "déedéet", "deedeet",
-        "dara", "naka", "ndax", "lu tax", "fan", "kañ", "kan", "ñaata",
-        "naata", "man", "yow", "moom", "nun", "yeen", "ñoom", "dama",
-        "bëgg", "begg", "dinaa", "wax", "dégg", "degg", "xool", "bind",
-        "jàng", "jang", "yëg", "yeg", "bul jaaxle", "léegi", "leegi",
-        "tey", "ëllëg", "ellëg", "ellek", "démb", "demb", "baal ma",
-        "mangi", "maa ngi", "xam naa", "xamuma", "mën naa", "menna",
-        "baax na",
-    ]
-
-    # Les mots appris en conversation comptent aussi comme marqueurs —
-    # sinon un mot enseigné par l'utilisateur ne serait jamais reconnu
-    # comme wolof dans les messages suivants.
-    markers = markers + list(get_learned_words())
-
-    lowered = text.lower()
-    hits = 0
-    for m in markers:
-        if not m:
-            continue
-        if re.search(rf"\b{re.escape(m)}\b", lowered):
-            hits += 1
-            if hits >= 1:
-                return True
-    return False
-
-
-def translate_text(text: str, direction: str):
-    """
-    Traduit `text` avec le LLM, guidé par le glossaire wolof/français.
-    direction : "wl_to_fr" ou "fr_to_wl".
-    Retourne le texte traduit, ou le texte original en cas d'échec
-    (fail-open : mieux vaut traiter le texte original que planter).
-    """
-    if not text or not text.strip():
-        return text
-
-    if direction == "wl_to_fr":
-        instruction = (
-            "Tu es un traducteur wolof → français. Traduis fidèlement le "
-            "texte suivant en français, en t'appuyant en PRIORITÉ sur le "
-            "glossaire fourni pour les termes qu'il couvre. Si un mot ne "
-            "figure pas dans le glossaire et que tu n'es pas sûr de son "
-            "sens, garde-le tel quel entre crochets (ex: [mot]) plutôt "
-            "que d'inventer une traduction — mieux vaut un trou visible "
-            "qu'un contresens. Réponds UNIQUEMENT avec la traduction, "
-            "sans commentaire, sans guillemets, sans répéter le texte "
-            "source, et ne dis jamais que tu ne comprends pas."
-        )
-    else:
-        instruction = (
-            "Tu es un traducteur français → wolof. Traduis fidèlement le "
-            "texte suivant en wolof, en t'appuyant EN PRIORITÉ sur le "
-            "glossaire fourni pour les termes qu'il couvre, et en gardant "
-            "un wolof naturel et cohérent (n'invente pas de mots, garde "
-            "en français les termes techniques/noms propres qui n'ont "
-            "pas d'équivalent connu). Réponds UNIQUEMENT avec la "
-            "traduction, sans commentaire, sans guillemets, sans répéter "
-            "le texte source."
-        )
-
-    try:
-        r = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": f"{instruction}\n\n{get_full_glossary_text()}"},
-                {"role": "user", "content": text},
-            ],
-            temperature=0.2,
-            max_tokens=800,
-        )
-        translated = (r.choices[0].message.content or "").strip()
-        return translated if translated else text
-    except Exception as e:
-        print("[TRANSLATE ERROR]", direction, e)
-        return text
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -486,21 +188,12 @@ def extract_pdf_text(pdf_base64: str):
 
 
 def analyze_document(doc_text: str, question: str):
-    """
-    Envoie le texte extrait du document + la question de l'utilisateur au
-    LLM. Si la question est en wolof, on la traduit en français avant de
-    l'envoyer (le document lui-même reste en français : c'est la langue
-    dans laquelle le modèle raisonne le mieux), puis on retraduit la
-    réponse en wolof.
-    """
-    is_wolof = detect_wolof(question)
-    question_fr = translate_text(question, "wl_to_fr") if is_wolof else question
-
+    """Envoie le texte extrait du document + la question de l'utilisateur au LLM."""
     try:
         prompt = (
             "Voici le contenu d'un document fourni par l'utilisateur :\n\n"
             f"---\n{doc_text}\n---\n\n"
-            f"Question de l'utilisateur : {question_fr}"
+            f"Question de l'utilisateur : {question}"
         )
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -511,15 +204,10 @@ def analyze_document(doc_text: str, question: str):
             temperature=0.5,
             max_tokens=700,
         )
-        answer = r.choices[0].message.content
+        return r.choices[0].message.content
     except Exception as e:
         print("[DOC ANALYSIS ERROR]", e)
         return None
-
-    if is_wolof and answer:
-        answer = translate_text(answer, "fr_to_wl")
-
-    return answer
 
 # ─────────────────────────────────────────────
 # TEXT TO SPEECH
@@ -543,11 +231,6 @@ def text_to_speech_base64(text: str, lang: str = "fr", max_retries: int = 2):
     Priorité 2 (fallback) : gTTS — endpoint non-officiel de Google
     Translate ; peut renvoyer 403/429 selon l'IP sortante de l'hébergeur
     (observé sur certaines IP partagées de type Render).
-
-    NB voix : ni edge-tts ni gTTS n'ont de voix wolof dédiée. On utilise la
-    voix française même pour du texte wolof (prononciation approximative,
-    mais reste compréhensible) — c'est une limitation connue, indépendante
-    du problème de qualité texte traité ici.
 
     Retourne (audio_base64, message_erreur). message_erreur est None en
     cas de succès, sinon contient le détail des deux échecs pour debug
@@ -653,32 +336,6 @@ def transcribe_audio_base64(audio_base64: str):
             except OSError:
                 pass
 
-CONFUSION_MARKERS = [
-    "je ne comprends pas", "je ne comprend pas", "je n'ai pas compris",
-    "je ne saisis pas", "pourriez-vous reformuler", "peux-tu reformuler",
-    "pouvez-vous préciser", "peux-tu préciser", "qu'est-ce que vous voulez dire",
-    "qu'est-ce que tu veux dire", "je ne sais pas ce que", "pas sûr de comprendre",
-]
-
-
-def _looks_confused(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(m in lowered for m in CONFUSION_MARKERS)
-
-
-def _run_chat_completion(working_message: str, history: list):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += history[-10:]
-    messages.append({"role": "user", "content": working_message})
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        temperature=0.7,
-        max_tokens=600,
-    )
-    return r.choices[0].message.content
-
-
 # ─────────────────────────────────────────────
 # CHAT HANDLER
 # ─────────────────────────────────────────────
@@ -695,52 +352,18 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
             "visual_prompt": intent["visual_prompt"],
         }
 
-    # ── Cas "enseignement" : l'utilisateur apprend un mot/une expression
-    # wolof au bot ("Jamm veut dire paix"). On l'extrait et on le sauvegarde
-    # dans le glossaire persistant, au lieu de laisser partir le message
-    # vers le chat normal (où il finit souvent en "je ne comprends pas").
-    if looks_like_teaching(user_message):
-        pairs = extract_taught_pairs(user_message)
-        added = add_learned_words(pairs)
-        if added:
-            lines = "\n".join(f"• « {p['wolof']} » = « {p['french']} »" for p in added)
-            confirmation = (
-                f"✅ Merci, j'ai retenu :\n{lines}\n\n"
-                "Je m'en servirai dans nos prochaines conversations."
-            )
-            result = {"response": confirmation, "learned": added}
-            if want_audio_response:
-                audio_b64, tts_error = text_to_speech_base64(confirmation)
-                result["audio_base64"] = audio_b64
-                if tts_error:
-                    result["tts_error"] = tts_error
-            return result
-        # Le message ressemblait à un enseignement mais rien d'exploitable
-        # n'a été extrait (ex: LLM indécis) → on retombe sur le flux normal.
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += history[-10:]
+    messages.append({"role": "user", "content": user_message})
 
-    # ── Traduction "sandwich" pour le wolof ──
-    # On traite le message en français (langue que le modèle maîtrise
-    # bien), puis on retraduit la réponse en wolof si besoin. C'est plus
-    # fiable qu'une génération directe en wolof, et ça évite les
-    # contresens dus à une mauvaise compréhension du wolof en entrée.
-    is_wolof = detect_wolof(user_message)
-    working_message = translate_text(user_message, "wl_to_fr") if is_wolof else user_message
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=600,
+    )
 
-    response_text = _run_chat_completion(working_message, history)
-
-    # ── Filet de sécurité : si le message n'a pas été détecté comme wolof
-    # (mot absent des marqueurs/glossaire) mais que le modèle répond par
-    # une formule d'incompréhension, on retente en forçant le chemin de
-    # traduction wolof → français avant de répondre. Ça rattrape les mots
-    # wolof que l'heuristique locale n'a pas reconnus.
-    if not is_wolof and _looks_confused(response_text):
-        retried_message = translate_text(user_message, "wl_to_fr")
-        if retried_message.strip().lower() != working_message.strip().lower():
-            is_wolof = True
-            response_text = _run_chat_completion(retried_message, history)
-
-    if is_wolof and response_text:
-        response_text = translate_text(response_text, "fr_to_wl")
+    response_text = r.choices[0].message.content
 
     result = {"response": response_text}
 
@@ -786,12 +409,6 @@ def tts():
         return jsonify({"error": tts_error or "échec de la synthèse vocale"}), 502
 
     return jsonify({"audio_base64": audio_b64})
-
-@app.route("/glossary", methods=["GET"])
-def glossary():
-    """Debug : liste des mots wolof appris en conversation."""
-    return jsonify({"learned": list(_load_learned_glossary().values())})
-
 
 @app.route("/chat", methods=["POST"])
 def chat():
