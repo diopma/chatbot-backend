@@ -86,7 +86,7 @@ WOLOF_VISUAL_NOUNS = [
 # Marqueurs wolof pondérés (score élevé = mot très spécifique au wolof)
 WOLOF_MARKERS_WEIGHTED = {
     # salutations / formules — très spécifiques
-    "nanga def": 3, "mangi fi yagui thi": 3, "mangi dem": 3,
+    "nanga def": 3, "mangi fi": 3, "mangi dem": 3,
     "jërejëf": 3, "jërëjëf": 3, "baal ma": 3,
     "yëndul": 3, "waaw waaw": 3, "deedeet": 3,
     "asalaa maalekum": 2, "maalekum salaam": 2,
@@ -334,7 +334,7 @@ RÈGLES IMPORTANTES :
 5. N'invente pas de mots wolof — si tu ne sais pas, mélange avec du français.
 
 EXPRESSIONS WOLOF UTILES :
-- Salutations: "Nanga def ?", "Mangi fi rekk yagui", "Jërejëf"
+- Salutations: "Nanga def ?", "Mangi fi rekk", "Jërejëf"
 - Accord: "Waaw", "Waaw waaw", "Siiw"
 - Refus/excuse: "Deedeet", "Baal ma"
 - Encouragement: "Yëgël na !", "Baax na !"
@@ -344,7 +344,7 @@ EXPRESSIONS WOLOF UTILES :
 - "Allons-y": "Daldi dem"
 
 Exemples de réponses naturelles :
-- User: "Nanga def ?" → "Mangi fi rekk yagui thi diam, jërejëf ! Yow noo ? Lan la be nelaw ?"
+- User: "Nanga def ?" → "Mangi fi rekk, jërejëf ! Yow noo ? Lan la be nelaw ?"
 - User: "Dama bëgg xam loolu" → "Waaw, maa ngi wax la ci. [explication]. Xam naa ?"
 - User: "Comment on dit merci en wolof ?" → "Ci wolof, 'merci' mooy 'jërejëf'. Neex na bañ !"
 """
