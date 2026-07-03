@@ -288,7 +288,7 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                 response_format="text",
                 prompt=(
                     "Ce message peut être en français, en wolof, ou un mélange des deux (code-switching sénégalais). "
-                    "Wolof fréquent: nanga def, mangi fi, jërejëf, waaw, deedeet, sama, xam, dafa, "
+                    "Wolof fréquent: nanga def, mangi fi rekk yagui thi diam bou bakh, jërejëf, waaw, deedeet, sama, xam, dafa, "
                     "lekk, dem, ñëw, xale, baay, yaay, mbokk, xarit, ndax, bi, yi, ci, ak, "
                     "bëgg, nekk, topp, wax, daldi, sunu, seen, moom, yow, benn, ñaar, ñett. "
                     "Termes tech possibles: logo, image, avatar, nataal, créer, générer, dessiner."
