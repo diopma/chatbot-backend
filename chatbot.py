@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import tempfile
 import urllib.parse
@@ -69,11 +70,6 @@ def detect_image_intent(msg: str):
 # ─────────────────────────────────────────────
 # LANGUAGE / SYSTEM PROMPT
 # ─────────────────────────────────────────────
-# Plutôt qu'une détection par mots-clés (peu fiable : la plupart des phrases
-# en wolof ne contiennent aucun des mots-clés type "nanga"/"mangi"/...), on
-# laisse le LLM identifier lui-même la langue du message et y répondre.
-# Llama 3.3 a une connaissance limitée du wolof (langue peu présente dans
-# les corpus d'entraînement) mais fait un effort correct en best-effort.
 SYSTEM_PROMPT = (
     "Tu es Yelen AI, un assistant qui parle français et wolof.\n"
     "Détecte automatiquement la langue du message de l'utilisateur "
@@ -84,6 +80,165 @@ SYSTEM_PROMPT = (
     "explicitement ou s'il mélange lui-même les deux langues.\n"
     "Si l'utilisateur écrit en français, réponds en français."
 )
+
+# ─────────────────────────────────────────────
+# WOLOF : GLOSSAIRE + TRADUCTION "SANDWICH"
+# ─────────────────────────────────────────────
+# Llama 3.3 a une connaissance très limitée du wolof (corpus d'entraînement
+# quasi inexistant pour cette langue), donc :
+#   1) il comprend mal certains mots/expressions wolof envoyés par
+#      l'utilisateur (contresens, incompréhension totale)
+#   2) il génère un wolof approximatif, mélangé de français, avec un
+#      vocabulaire parfois inventé
+#
+# Stratégie retenue : "traduction sandwich"
+#   wolof (utilisateur) --[traduction guidée par glossaire]--> français
+#   --[LLM répond normalement en français, tâche qu'il maîtrise bien]-->
+#   français --[traduction guidée par glossaire]--> wolof (réponse finale)
+#
+# Une tâche de TRADUCTION (contrainte, avec du contexte lexical fourni)
+# est beaucoup plus fiable pour un LLM qu'une GÉNÉRATION libre dans une
+# langue peu représentée dans son corpus. On combine ça avec un glossaire
+# bilingue injecté dans le prompt pour forcer un vocabulaire correct et
+# cohérent des deux côtés (compréhension ET génération).
+
+WOLOF_FR_GLOSSARY = """
+Glossaire wolof ↔ français (vocabulaire courant, à utiliser en priorité
+pour la traduction — respecte cette terminologie plutôt que d'improviser) :
+
+Salutations / politesse :
+- Nanga def / Na nga def = Comment vas-tu / Comment ça va
+- Maa ngi fi (rekk) = Je vais bien (ça va)
+- Jërejëf = Merci
+- Amul solo = De rien / Ce n'est rien
+- Baal ma = Excuse-moi / Pardon
+- Ba beneen = À bientôt / Au revoir
+
+Oui / non / affirmations :
+- Waaw = Oui
+- Déedéet = Non
+- Dara = Rien
+- Baax na = D'accord / C'est bien
+- Xam naa = Je sais
+- Xamuma = Je ne sais pas
+- Mën naa = Je peux
+- Mënuma = Je ne peux pas
+
+Mots interrogatifs :
+- Naka = Comment
+- Lan / Lu = Quoi
+- Ndax = Est-ce que
+- Lu tax = Pourquoi
+- Fan / Ana = Où
+- Kañ = Quand
+- Kan = Qui
+- Ñaata = Combien
+
+Pronoms / personnes :
+- Man = Moi
+- Yow = Toi
+- Moom = Lui / Elle
+- Nun = Nous
+- Yeen = Vous
+- Ñoom = Eux
+
+Verbes / expressions utiles pour un assistant :
+- Dama bëgg / Da nga bëgg = Je veux / Tu veux
+- Dinaa (+ verbe) = Je vais (futur proche)
+- Wax = Parler / Dire
+- Dégg = Comprendre / Entendre
+- Xool = Regarder
+- Bind = Écrire
+- Jàng = Lire / Étudier
+- Yëg = Ressentir / Faire savoir
+- Bul jaaxle = Ne t'inquiète pas
+- Léegi = Maintenant
+- Tey = Aujourd'hui
+- Ëllëg = Demain
+- Démb = Hier
+- Su fekkee = Si (condition)
+- Bu bëgge = Si tu veux
+""".strip()
+
+
+def detect_wolof(text: str) -> bool:
+    """
+    Heuristique locale (rapide, sans appel API) pour repérer un message
+    probablement écrit en wolof, en cherchant des marqueurs très fréquents
+    (mots-outils, pronoms, interrogatifs) plutôt qu'un mot-clé isolé — plus
+    fiable que l'ancienne approche par mots-clés ponctuels.
+    Ce n'est qu'un pré-filtre : en cas de doute on part du principe que
+    c'est du français, et le SYSTEM_PROMPT sert de filet de sécurité pour
+    les cas mixtes ou mal détectés.
+    """
+    if not text:
+        return False
+
+    markers = [
+        "nanga", "def", "jërejëf", "jerejef", "waaw", "déedéet", "deedeet",
+        "dara", "naka", "ndax", "lu tax", "fan", "kañ", "kan", "ñaata",
+        "naata", "man", "yow", "moom", "nun", "yeen", "ñoom", "dama",
+        "bëgg", "begg", "dinaa", "wax", "dégg", "degg", "xool", "bind",
+        "jàng", "jang", "yëg", "yeg", "bul jaaxle", "léegi", "leegi",
+        "tey", "ëllëg", "ellëg", "ellek", "démb", "demb", "baal ma",
+        "mangi", "maa ngi", "xam naa", "xamuma", "mën naa", "menna",
+        "baax na",
+    ]
+
+    lowered = text.lower()
+    hits = 0
+    for m in markers:
+        if re.search(rf"\b{re.escape(m)}\b", lowered):
+            hits += 1
+            if hits >= 1:
+                return True
+    return False
+
+
+def translate_text(text: str, direction: str):
+    """
+    Traduit `text` avec le LLM, guidé par le glossaire wolof/français.
+    direction : "wl_to_fr" ou "fr_to_wl".
+    Retourne le texte traduit, ou le texte original en cas d'échec
+    (fail-open : mieux vaut traiter le texte original que planter).
+    """
+    if not text or not text.strip():
+        return text
+
+    if direction == "wl_to_fr":
+        instruction = (
+            "Tu es un traducteur wolof → français. Traduis fidèlement le "
+            "texte suivant en français, en t'appuyant sur le glossaire "
+            "fourni pour les termes qu'il couvre. Réponds UNIQUEMENT avec "
+            "la traduction, sans commentaire, sans guillemets, sans "
+            "répéter le texte source."
+        )
+    else:
+        instruction = (
+            "Tu es un traducteur français → wolof. Traduis fidèlement le "
+            "texte suivant en wolof, en t'appuyant sur le glossaire fourni "
+            "pour les termes qu'il couvre, et en gardant un wolof naturel "
+            "et cohérent (n'invente pas de mots, garde en français les "
+            "termes techniques/noms propres qui n'ont pas d'équivalent "
+            "connu). Réponds UNIQUEMENT avec la traduction, sans "
+            "commentaire, sans guillemets, sans répéter le texte source."
+        )
+
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": f"{instruction}\n\n{WOLOF_FR_GLOSSARY}"},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2,
+            max_tokens=800,
+        )
+        translated = (r.choices[0].message.content or "").strip()
+        return translated if translated else text
+    except Exception as e:
+        print("[TRANSLATE ERROR]", direction, e)
+        return text
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -188,12 +343,21 @@ def extract_pdf_text(pdf_base64: str):
 
 
 def analyze_document(doc_text: str, question: str):
-    """Envoie le texte extrait du document + la question de l'utilisateur au LLM."""
+    """
+    Envoie le texte extrait du document + la question de l'utilisateur au
+    LLM. Si la question est en wolof, on la traduit en français avant de
+    l'envoyer (le document lui-même reste en français : c'est la langue
+    dans laquelle le modèle raisonne le mieux), puis on retraduit la
+    réponse en wolof.
+    """
+    is_wolof = detect_wolof(question)
+    question_fr = translate_text(question, "wl_to_fr") if is_wolof else question
+
     try:
         prompt = (
             "Voici le contenu d'un document fourni par l'utilisateur :\n\n"
             f"---\n{doc_text}\n---\n\n"
-            f"Question de l'utilisateur : {question}"
+            f"Question de l'utilisateur : {question_fr}"
         )
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -204,10 +368,15 @@ def analyze_document(doc_text: str, question: str):
             temperature=0.5,
             max_tokens=700,
         )
-        return r.choices[0].message.content
+        answer = r.choices[0].message.content
     except Exception as e:
         print("[DOC ANALYSIS ERROR]", e)
         return None
+
+    if is_wolof and answer:
+        answer = translate_text(answer, "fr_to_wl")
+
+    return answer
 
 # ─────────────────────────────────────────────
 # TEXT TO SPEECH
@@ -231,6 +400,11 @@ def text_to_speech_base64(text: str, lang: str = "fr", max_retries: int = 2):
     Priorité 2 (fallback) : gTTS — endpoint non-officiel de Google
     Translate ; peut renvoyer 403/429 selon l'IP sortante de l'hébergeur
     (observé sur certaines IP partagées de type Render).
+
+    NB voix : ni edge-tts ni gTTS n'ont de voix wolof dédiée. On utilise la
+    voix française même pour du texte wolof (prononciation approximative,
+    mais reste compréhensible) — c'est une limitation connue, indépendante
+    du problème de qualité texte traité ici.
 
     Retourne (audio_base64, message_erreur). message_erreur est None en
     cas de succès, sinon contient le détail des deux échecs pour debug
@@ -352,9 +526,17 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
             "visual_prompt": intent["visual_prompt"],
         }
 
+    # ── Traduction "sandwich" pour le wolof ──
+    # On traite le message en français (langue que le modèle maîtrise
+    # bien), puis on retraduit la réponse en wolof si besoin. C'est plus
+    # fiable qu'une génération directe en wolof, et ça évite les
+    # contresens dus à une mauvaise compréhension du wolof en entrée.
+    is_wolof = detect_wolof(user_message)
+    working_message = translate_text(user_message, "wl_to_fr") if is_wolof else user_message
+
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += history[-10:]
-    messages.append({"role": "user", "content": user_message})
+    messages.append({"role": "user", "content": working_message})
 
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -364,6 +546,9 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     )
 
     response_text = r.choices[0].message.content
+
+    if is_wolof and response_text:
+        response_text = translate_text(response_text, "fr_to_wl")
 
     result = {"response": response_text}
 
