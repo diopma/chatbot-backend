@@ -336,10 +336,50 @@ def transcribe_audio_base64(audio_base64: str):
             except OSError:
                 pass
 
-# ─────────────────────────────────────────────
+            
+
+# ───────────────────────────────────────────── detect language
+def detect_language(text: str):
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """
+Tu détectes uniquement la langue.
+
+Réponds uniquement par :
+
+fr
+ou
+wo
+
+Rien d'autre.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            temperature=0
+        )
+
+        lang = r.choices[0].message.content.strip().lower()
+
+        if lang not in ["fr", "wo"]:
+            return "fr"
+
+        return lang
+
+    except:
+        return "fr"
+
 # CHAT HANDLER
 # ─────────────────────────────────────────────
 def handle_chat(user_message: str, history: list, want_audio_response: bool = False):
+
     intent = detect_image_intent(user_message)
 
     if intent:
@@ -352,34 +392,116 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
             "visual_prompt": intent["visual_prompt"],
         }
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Détection de langue
+    lang = detect_language(user_message)
+
+    if lang == "wo":
+        system_prompt = SYSTEM_PROMPT + """
+
+L'utilisateur parle wolof.
+
+Réponds EXCLUSIVEMENT en wolof.
+
+N'utilise jamais le français.
+"""
+    else:
+        system_prompt = SYSTEM_PROMPT
+
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+
+        {
+            "role": "user",
+            "content": "Nanga def ?"
+        },
+        {
+            "role": "assistant",
+            "content": "Mangi fi rekk. Yow nag naka nga def ?"
+        },
+
+        {
+            "role": "user",
+            "content": "Lan mooy intelligence artificielle ?"
+        },
+        {
+            "role": "assistant",
+            "content": "Intelligence artificielle mooy xam-xam bu ordinateur di jëfandikoo ngir man a xalaat, jàng, jël dogal te dimbali nit ci liggéey yu bari."
+        },
+
+        {
+            "role": "user",
+            "content": "Ndax mën nga dimbali ma ?"
+        },
+        {
+            "role": "assistant",
+            "content": "Waaw, man naa la dimbali. Wax ma li nga bëgg."
+        }
+    ]
+
     messages += history[-10:]
-    messages.append({"role": "user", "content": user_message})
+
+    messages.append({
+        "role": "user",
+        "content": user_message
+    })
 
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
-        temperature=0.7,
+        temperature=0.5,
         max_tokens=600,
     )
 
     response_text = r.choices[0].message.content
 
-    result = {"response": response_text}
+    # Correction du wolof
+    if lang == "wo":
+        try:
+            correction = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """
+Réécris uniquement en wolof naturel du Sénégal.
 
-    # On ne génère l'audio de réponse que si le client le demande
-    # (ex: l'utilisateur a envoyé un vocal) pour ne pas surcharger
-    # inutilement les requêtes texte classiques si besoin de couper ce comportement.
+Ne traduis pas.
+
+Ne mélange jamais avec le français.
+
+Corrige seulement le wolof.
+"""
+                    },
+                    {
+                        "role": "user",
+                        "content": response_text
+                    }
+                ]
+            )
+
+            response_text = correction.choices[0].message.content
+
+        except Exception as e:
+            print("[WOLOF CORRECTION]", e)
+
+    result = {
+        "response": response_text
+    }
+
     if want_audio_response:
+
         audio_b64, tts_error = text_to_speech_base64(response_text)
+
         result["audio_base64"] = audio_b64
+
         if tts_error:
-            # Visible dans les logs Render ET dans la réponse, pour debug rapide.
-            print("[TTS] échec définitif après retries :", tts_error)
             result["tts_error"] = tts_error
 
     return result
-
 # ─────────────────────────────────────────────
 # ROUTES
 # ─────────────────────────────────────────────
