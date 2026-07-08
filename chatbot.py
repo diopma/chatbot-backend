@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import threading
 import base64
 import tempfile
@@ -22,6 +23,37 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+
+# ─────────────────────────────────────────────
+# NLLB-200 (Hugging Face) — traduction dédiée pour le wolof
+# ─────────────────────────────────────────────
+# Llama 3.3 a une connaissance très limitée du wolof. NLLB-200 (Meta) est
+# lui entraîné spécifiquement pour la traduction et supporte officiellement
+# le wolof (code "wol_Latn") : bien meilleure qualité que de demander à un
+# LLM généraliste de traduire. On l'utilise en priorité, avec repli sur la
+# traduction via Llama+glossaire si la clé HF est absente ou l'appel échoue.
+HF_API_KEY = os.getenv("HF_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
+# Modèle par défaut : version de NLLB-200 fine-tunée spécifiquement sur du
+# wolof/français/anglais (bilalfaye/english-wolof-french-translation),
+# donc plus précise sur le wolof que le NLLB-200 générique. Reste
+# surchargeable via la variable d'env NLLB_MODEL si besoin (ex. repli sur
+# "facebook/nllb-200-distilled-600M" ou passage à la version 1.3B).
+NLLB_MODEL = os.getenv("NLLB_MODEL", "bilalfaye/nllb-200-distilled-600M-wo-fr-en")
+NLLB_API_URL = f"https://api-inference.huggingface.co/models/{NLLB_MODEL}"
+# Codes de langue NLLB standards ; certains modèles fine-tunés utilisent
+# parfois des codes custom dans leur tokenizer — surchargeables sans
+# retoucher le code si jamais l'API renvoie une erreur de langue.
+NLLB_LANG_CODES = {
+    "fr": os.getenv("NLLB_FR_CODE", "fra_Latn"),
+    "wl": os.getenv("NLLB_WL_CODE", "wol_Latn"),
+}
+
+if not HF_API_KEY:
+    print(
+        "[WARN] HF_API_KEY absente : la traduction wolof utilisera le "
+        "repli Llama+glossaire (moins fiable que NLLB-200). Définis "
+        "HF_API_KEY (clé Hugging Face gratuite) pour activer NLLB."
+    )
 
 if not GROQ_API_KEY:
     raise Exception("GROQ_API_KEY manquant")
@@ -333,16 +365,114 @@ def detect_wolof(text: str) -> bool:
     return False
 
 
-def translate_text(text: str, direction: str):
+def _nllb_translate(text: str, src: str, tgt: str, max_retries: int = 2):
     """
-    Traduit `text` avec le LLM, guidé par le glossaire wolof/français.
-    direction : "wl_to_fr" ou "fr_to_wl".
-    Retourne le texte traduit, ou le texte original en cas d'échec
-    (fail-open : mieux vaut traiter le texte original que planter).
+    Appelle NLLB-200 via l'API d'inférence Hugging Face.
+    src/tgt : "fr" ou "wl". Retourne le texte traduit, ou None si
+    indisponible (pas de clé, erreur, modèle en cours de chargement après
+    plusieurs tentatives) — auquel cas l'appelant doit basculer sur le
+    repli LLM+glossaire.
     """
-    if not text or not text.strip():
-        return text
+    if not HF_API_KEY:
+        return None
 
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {
+        "inputs": text,
+        "parameters": {
+            "src_lang": NLLB_LANG_CODES[src],
+            "tgt_lang": NLLB_LANG_CODES[tgt],
+        },
+    }
+
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(NLLB_API_URL, headers=headers, json=payload, timeout=30)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and data and "translation_text" in data[0]:
+                    result = data[0]["translation_text"].strip()
+                    return result if result else None
+                print("[NLLB WARN] réponse inattendue :", data)
+                return None
+
+            if resp.status_code == 503:
+                # Modèle en cours de "cold start" côté Hugging Face — on
+                # attend le temps estimé puis on retente.
+                wait = 5
+                try:
+                    wait = float(resp.json().get("estimated_time", 5))
+                except Exception:
+                    pass
+                time.sleep(min(wait, 15))
+                continue
+
+            print("[NLLB ERROR]", resp.status_code, resp.text[:300])
+            return None
+
+        except Exception as e:
+            print("[NLLB EXCEPTION]", e)
+            return None
+
+    return None
+
+
+def _apply_learned_corrections(source_text: str, translated_text: str, direction: str) -> str:
+    """
+    NLLB ne connaît pas les mots que l'utilisateur a enseignés en
+    conversation. Si l'un de ces mots apparaît dans le texte source, on
+    passe par une petite correction LLM ciblée pour s'assurer qu'il est
+    bien respecté — sinon on ne touche à rien (pas d'appel inutile).
+    """
+    learned = _load_learned_glossary()
+    if not learned:
+        return translated_text
+
+    lowered_source = source_text.lower()
+    relevant = [
+        v for k, v in learned.items()
+        if re.search(rf"\b{re.escape(k)}\b", lowered_source)
+    ]
+    if not relevant:
+        return translated_text
+
+    pairs_text = "\n".join(f"- {v['wolof']} = {v['french']}" for v in relevant)
+    lang_note = "wolof vers français" if direction == "wl_to_fr" else "français vers wolof"
+    instruction = (
+        f"Voici une traduction {lang_note} produite par un modèle de "
+        "traduction automatique (NLLB). Vérifie qu'elle respecte "
+        "STRICTEMENT ces correspondances apprises auprès de "
+        f"l'utilisateur, et corrige la traduction si besoin :\n{pairs_text}\n\n"
+        "Réponds UNIQUEMENT avec la traduction corrigée (identique si "
+        "elle est déjà correcte), sans commentaire, sans guillemets."
+    )
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": instruction},
+                {
+                    "role": "user",
+                    "content": f"Texte source : {source_text}\nTraduction à vérifier : {translated_text}",
+                },
+            ],
+            temperature=0,
+            max_tokens=800,
+        )
+        corrected = (r.choices[0].message.content or "").strip()
+        return corrected if corrected else translated_text
+    except Exception as e:
+        print("[GLOSSARY CORRECTION ERROR]", e)
+        return translated_text
+
+
+def _llm_translate_fallback(text: str, direction: str) -> str:
+    """
+    Repli utilisé quand NLLB est indisponible (pas de clé HF, panne,
+    modèle indisponible) : traduction via Llama guidée par le glossaire.
+    Moins fiable que NLLB pour le wolof, mais mieux que rien.
+    """
     if direction == "wl_to_fr":
         instruction = (
             "Tu es un traducteur wolof → français. Traduis fidèlement le "
@@ -382,6 +512,34 @@ def translate_text(text: str, direction: str):
     except Exception as e:
         print("[TRANSLATE ERROR]", direction, e)
         return text
+
+
+def translate_text(text: str, direction: str):
+    """
+    Traduit `text`. direction : "wl_to_fr" ou "fr_to_wl".
+
+    Priorité 1 : NLLB-200 (Hugging Face) — modèle dédié à la traduction,
+    qui supporte réellement le wolof, donc bien plus fiable que de
+    demander à un LLM généraliste de traduire.
+    Priorité 2 (repli) : Llama + glossaire, si NLLB est indisponible.
+
+    Dans les deux cas, si l'utilisateur a enseigné des mots en
+    conversation et qu'ils apparaissent dans le texte source, une
+    correction ciblée est appliquée pour les respecter.
+
+    Retourne le texte traduit, ou le texte original en dernier recours
+    (fail-open : mieux vaut traiter le texte original que planter).
+    """
+    if not text or not text.strip():
+        return text
+
+    src, tgt = ("wl", "fr") if direction == "wl_to_fr" else ("fr", "wl")
+
+    nllb_result = _nllb_translate(text, src, tgt)
+    if nllb_result:
+        return _apply_learned_corrections(text, nllb_result, direction)
+
+    return _llm_translate_fallback(text, direction)
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
