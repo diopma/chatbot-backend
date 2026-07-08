@@ -188,32 +188,41 @@ WOLOF_WORDS = {
 
 
 
-
 def detect_language(text: str) -> str:
     t = text.lower()
 
-wolof_score = 0
+    wolof_score = 0
 
-for exp, score in WOLOF_EXPRESSIONS.items():
-    if exp in t:
-        wolof_score += score
+    for exp, score in WOLOF_EXPRESSIONS.items():
+        if exp in t:
+            wolof_score += score
 
-for word, score in WOLOF_WORDS.items():
-    if f" {word} " in f" {t} ":
-        wolof_score += score
+    for word, score in WOLOF_WORDS.items():
+        if f" {word} " in f" {t} ":
+            wolof_score += score
+
     french_words = [
         "je", "tu", "il", "elle", "nous", "vous", "les", "des",
         "une", "est", "avec", "bonjour", "merci", "comment",
         "pourquoi", "mais", "donc", "alors", "pour", "dans", "que",
     ]
-    french_score = sum(1 for w in french_words if f" {w} " in f" {t} ")
-    print(f"[LANG] wolof={wolof_score} french={french_score} | '{t[:50]}'")
-    if wolof_score >= 3:                        return "wolof"
-    if wolof_score >= 2 and french_score <= 3:  return "wolof"
-    if wolof_score >= 1 and french_score >= 1:  return "wolof"
-    if french_score >= 2:                       return "french"
-    return "french"
 
+    french_score = sum(
+        1 for w in french_words if f" {w} " in f" {t} "
+    )
+
+    print(f"[LANG] wolof={wolof_score} french={french_score} | '{t[:50]}'")
+
+    if wolof_score >= 3:
+        return "wolof"
+    if wolof_score >= 2 and french_score <= 3:
+        return "wolof"
+    if wolof_score >= 1 and french_score >= 1:
+        return "wolof"
+    if french_score >= 2:
+        return "french"
+
+    return "french"
 # ─────────────────────────────────────────────────────────────
 # EXTRACTION TEXTE DOCUMENT
 # ─────────────────────────────────────────────────────────────
