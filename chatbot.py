@@ -1,19 +1,26 @@
 import os
+import re
+import json
+import threading
 import base64
 import tempfile
 import urllib.parse
 import requests
 import io
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
+from gtts import gTTS
+import asyncio
+import edge_tts
+from pypdf import PdfReader
 
 app = Flask(__name__)
 CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
-GROQ_API_KEY     = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
 if not GROQ_API_KEY:
@@ -21,606 +28,856 @@ if not GROQ_API_KEY:
 
 client = Groq(api_key=GROQ_API_KEY)
 
-# ─────────────────────────────────────────────────────────────
-# IMAGE STYLES & SIZES
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# IMAGE CONFIG
+# ─────────────────────────────────────────────
 TYPE_PROMPTS = {
-    "logo":         "minimalist professional flat vector logo, clean sharp edges, bold colors, white background, centered composition",
-    "icon":         "simple modern app icon, flat design, bold colors, clean lines, centered, rounded corners",
-    "illustration": "vibrant detailed african art illustration, rich warm colors, professional digital painting",
-    "photo":        "photorealistic professional DSLR photo, sharp focus, perfect lighting, 8k resolution",
-    "pattern":      "beautiful seamless african kente textile pattern, vibrant traditional colors, intricate geometric weave",
-    "banner":       "modern professional wide marketing banner, bold typography, vibrant gradient colors",
-    "avatar":       "professional portrait photo, centered face, studio lighting, sharp focus, neutral background",
-    "poster":       "eye-catching event poster design, bold typography, vibrant colors, dynamic composition",
-    "general":      "high quality professional digital art, vibrant colors, sharp details, 4k, masterpiece",
+    "logo": "minimalist professional flat vector logo...",
+    "icon": "simple modern app icon...",
+    "illustration": "vibrant detailed african art illustration...",
+    "photo": "photorealistic DSLR photo...",
+    "pattern": "seamless african kente textile pattern...",
+    "banner": "modern marketing banner...",
+    "avatar": "professional portrait photo...",
+    "poster": "eye-catching poster design...",
+    "general": "high quality digital art..."
 }
 
 TYPE_SIZES = {
-    "logo":         (1024, 1024),
-    "icon":         (512,  512),
-    "illustration": (768,  1024),
-    "photo":        (1024, 1024),
-    "pattern":      (1024, 1024),
-    "banner":       (1024, 512),
-    "avatar":       (512,  512),
-    "poster":       (768,  1024),
-    "general":      (1024, 1024),
+    "logo": (1024, 1024),
+    "icon": (512, 512),
+    "illustration": (768, 1024),
+    "photo": (1024, 1024),
+    "pattern": (1024, 1024),
+    "banner": (1024, 512),
+    "avatar": (512, 512),
+    "poster": (768, 1024),
+    "general": (1024, 1024),
 }
 
-IMAGE_TYPE_KEYWORDS = {
-    "logo":         ["logo"],
-    "icon":         ["icône", "icone", "icon"],
-    "illustration": ["illustration", "art", "dessin", "nataal"],
-    "photo":        ["photo", "photographie", "réaliste", "realistic"],
-    "pattern":      ["motif", "pattern", "kente", "wax", "textile", "tissu"],
-    "banner":       ["bannière", "banniere", "banner", "couverture"],
-    "avatar":       ["avatar", "profil", "portrait", "visage"],
-    "poster":       ["affiche", "poster", "flyer"],
-}
-
-IMAGE_TRIGGERS = [
-    "logo", "logos", "icône", "icones", "icon", "icons",
-    "illustration", "illustrations", "avatar", "avatars",
-    "bannière", "banniere", "banner", "banners",
-    "affiche", "poster", "posters", "flyer", "flyers",
-    "motif", "pattern", "patterns", "visuel", "visuels",
-    "dessin", "dessins", "portrait", "portraits",
-    # Wolof
-    "nataal", "nataalu", "nataalyi", "nataalye",
-    "sama nataal", "seen nataal", "yenn nataal",
-]
-
-IMAGE_VERBS = [
-    "génère", "générer", "genere", "generer",
-    "crée", "créer", "cree", "creer",
-    "dessine", "dessiner", "fais", "faire",
-    "montre", "montrer", "produis", "produire",
-    "réalise", "realise", "imagine",
-    "génère-moi", "fais-moi", "crée-moi",
-    "generate", "create", "draw", "make", "render", "design",
-    # Wolof
-    "def", "defal", "bind", "bindal",
-    "yëgël", "yegal", "def ma", "bind ma",
-    "yokk", "yokkal", "wone", "woneel",
-]
-
-def _norm(text: str) -> str:
-    return (text.lower()
-        .replace("é","e").replace("è","e").replace("ê","e")
-        .replace("à","a").replace("â","a").replace("ç","c")
-        .replace("ù","u").replace("û","u").replace("î","i")
-        .replace("ï","i").replace("ô","o"))
-
-def detect_image_intent(msg: str) -> dict | None:
-    m     = _norm(msg)
-    words = m.split()
-    has_noun = any(_norm(n) in words or _norm(n) in m for n in IMAGE_TRIGGERS)
-    has_verb = any(_norm(v) in words or _norm(v) in m for v in IMAGE_VERBS)
-    if not (has_noun or (has_verb and has_noun)):
+# ─────────────────────────────────────────────
+# IMAGE INTENT DETECTION
+# ─────────────────────────────────────────────
+def detect_image_intent(msg: str):
+    msg = msg.lower()
+    triggers = ["logo", "image", "dessine", "crée", "avatar", "poster"]
+    if not any(t in msg for t in triggers):
         return None
-    gen_type = "general"
-    for t, keywords in IMAGE_TYPE_KEYWORDS.items():
-        if any(_norm(kw) in m for kw in keywords):
-            gen_type = t
-            break
     return {
-        "type":                 gen_type,
-        "visual_prompt":        msg,
-        "confirmation_message": "🎨 Image générée !",
+        "type": "general",
+        "visual_prompt": msg,
+        "confirmation_message": "🎨 Image générée !"
     }
 
-# ─────────────────────────────────────────────────────────────
-# DÉTECTION LANGUE
-# ─────────────────────────────────────────────────────────────
-WOLOF_WORDS = {
-    "nanga def": 4, "mangi fi rekk": 4, "jërejëf lool": 4,
-    "maa ngi fi": 4, "dafa baax": 4, "dafa neex": 4,
-    "xam naa": 4, "amul solo": 4, "def ma": 4, "bind ma": 4,
-    "soo bëgg": 4, "bëgg naa": 4, "waaw waaw": 4,
-    "jërejëf": 3, "baal ma": 3, "deedeet": 3,
-    "mangi": 3, "maa ngi": 3, "nataal": 3,
-    "liggéey": 3, "dafa": 3, "dama": 3, "xam": 3,
-    "bëgg": 3, "rekk": 3, "yëgël": 3, "ndanka": 3,
-    "mbokk": 3, "xarit": 3, "niit": 3, "wolof": 3,
-    "waaw": 2, "yow": 2, "moom": 2, "laa": 2,
-    "naa": 2, "nga": 2, "nekk": 2, "topp": 2,
-    "wax": 2, "gis": 2, "rafet": 2, "baax": 2,
-    "neex": 2, "ndax": 2, "waaye": 2, "tey": 2,
-    "jaay": 2, "jënd": 2, "daldi": 2, "seet": 2,
-    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
-    "fëkk": 1, "bind": 1, "jëf": 1, "tëdd": 1,
-    "ak": 1, "sama": 1, "seen": 1, "ci": 1,
-    "bi": 1, "yi": 1, "bu": 1, "baay": 1,
-    "yaay": 1, "xale": 1, "goor": 1, "benn": 1,
-    "ñaar": 1, "ñett": 1, "juróom": 1, "lool": 1,
-    "sunu": 1, "def": 1, "am": 1, "yalla": 2,
-    "incha allah": 2, "baraka": 2,
-}
-
-def detect_language(text: str) -> str:
-    t = text.lower()
-    wolof_score = sum(w for m, w in WOLOF_WORDS.items() if m in t)
-    french_words = [
-        "je", "tu", "il", "elle", "nous", "vous", "les", "des",
-        "une", "est", "avec", "bonjour", "merci", "comment",
-        "pourquoi", "mais", "donc", "alors", "pour", "dans", "que",
-    ]
-    french_score = sum(1 for w in french_words if f" {w} " in f" {t} ")
-    print(f"[LANG] wolof={wolof_score} french={french_score} | '{t[:50]}'")
-    if wolof_score >= 3:                        return "wolof"
-    if wolof_score >= 2 and french_score <= 3:  return "wolof"
-    if wolof_score >= 1 and french_score >= 1:  return "wolof"
-    if french_score >= 2:                       return "french"
-    return "french"
-
-# ─────────────────────────────────────────────────────────────
-# EXTRACTION TEXTE DOCUMENT
-# ─────────────────────────────────────────────────────────────
-def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
-    ext = filename.lower().split(".")[-1] if "." in filename else ""
-    print(f"[DOC] {filename} | {len(file_bytes)} bytes | ext={ext}")
-
-    if ext in ("txt", "md", "csv", "json", "xml", "html", "py", "js"):
-        try:
-            return file_bytes.decode("utf-8", errors="replace")[:15000]
-        except Exception as e:
-            return f"Erreur lecture : {e}"
-
-    if ext == "pdf":
-        try:
-            import pypdf
-            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-            text = "".join(page.extract_text() or "" for page in reader.pages[:20])
-            return text[:15000] if text.strip() else "PDF sans texte extractible."
-        except ImportError:
-            return "❌ pypdf non installé. Ajoute pypdf dans requirements.txt"
-        except Exception as e:
-            return f"Erreur PDF: {e}"
-
-    if ext == "docx":
-        try:
-            import docx
-            doc = docx.Document(io.BytesIO(file_bytes))
-            return "\n".join(p.text for p in doc.paragraphs)[:15000]
-        except ImportError:
-            return "❌ python-docx non installé."
-        except Exception as e:
-            return f"Erreur DOCX: {e}"
-
-    if ext in ("xlsx", "xls"):
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-            text = ""
-            for sheet in wb.sheetnames[:3]:
-                ws = wb[sheet]
-                text += f"\n--- Feuille: {sheet} ---\n"
-                for row in ws.iter_rows(max_row=100, values_only=True):
-                    row_text = " | ".join(str(c) for c in row if c is not None)
-                    if row_text.strip():
-                        text += row_text + "\n"
-            return text[:15000]
-        except ImportError:
-            return "❌ openpyxl non installé."
-        except Exception as e:
-            return f"Erreur XLSX: {e}"
-
-    return f"❌ Format '{ext}' non supporté. Formats acceptés : PDF, DOCX, TXT, CSV, XLSX."
-
-# ─────────────────────────────────────────────────────────────
-# TRADUCTION PROMPT → ANGLAIS
-# ─────────────────────────────────────────────────────────────
-def translate_prompt_to_english(prompt: str) -> str:
-    try:
-        r = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "Translate the user's request into a detailed English image generation prompt. Return ONLY the English prompt, nothing else."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2, max_tokens=120,
-        )
-        translated = r.choices[0].message.content.strip()
-        print(f"[PROMPT EN] {translated}")
-        return translated
-    except Exception as e:
-        print(f"[TRANSLATE ERR] {e}")
-        return prompt
-
-# ─────────────────────────────────────────────────────────────
-# GÉNÉRATION IMAGE
-# ─────────────────────────────────────────────────────────────
-def generate_image(prompt: str, gen_type: str) -> str | None:
-    english = translate_prompt_to_english(prompt)
-    prefix  = TYPE_PROMPTS.get(gen_type, "")
-    full    = f"{prefix}, {english}, masterpiece, best quality, ultra detailed, sharp"
-    w, h    = TYPE_SIZES.get(gen_type, (1024, 1024))
-    print(f"[IMAGE] {gen_type} | {full[:80]}...")
-
-    if TOGETHER_API_KEY:
-        try:
-            r = requests.post(
-                "https://api.together.xyz/v1/images/generations",
-                headers={"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"},
-                json={"model": "black-forest-labs/FLUX.1-schnell-Free", "prompt": full,
-                      "width": min(w,1024), "height": min(h,1024), "steps": 4,
-                      "n": 1, "response_format": "b64_json"},
-                timeout=90,
-            )
-            r.raise_for_status()
-            return r.json()["data"][0]["b64_json"]
-        except Exception as e:
-            print("[FLUX ERR]", e)
-
-    try:
-        enc = urllib.parse.quote(full)
-        url = f"https://image.pollinations.ai/prompt/{enc}?width={w}&height={h}&nologo=true&enhance=true&model=flux"
-        res = requests.get(url, timeout=90)
-        return base64.b64encode(res.content).decode()
-    except Exception as e:
-        print("[POLLINATIONS ERR]", e)
-        return None
-
-# ─────────────────────────────────────────────────────────────
-# DÉTECTION MIME
-# ─────────────────────────────────────────────────────────────
-def get_mime(b64: str) -> str:
-    try:
-        h = base64.b64decode(b64[:20])
-        if h[:4] == b'\x89PNG':  return "image/png"
-        if h[:2] == b'\xff\xd8': return "image/jpeg"
-        if b'WEBP' in h:         return "image/webp"
-    except Exception:
-        pass
-    return "image/jpeg"
-
-# ─────────────────────────────────────────────────────────────
-# TRANSCRIPTION AUDIO — ✅ response_format="text" uniquement
-# ─────────────────────────────────────────────────────────────
-def transcribe_audio(audio_bytes: bytes) -> str:
-    # Détection format par magic bytes
-    suffix, mime = ".m4a", "audio/mp4"
-    if len(audio_bytes) >= 4:
-        if audio_bytes[:4] == b'RIFF':
-            suffix, mime = ".wav", "audio/wav"
-        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
-            suffix, mime = ".mp3", "audio/mpeg"
-        elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':
-            suffix, mime = ".m4a", "audio/mp4"
-        elif audio_bytes[:4] == b'OggS':
-            suffix, mime = ".ogg", "audio/ogg"
-
-    print(f"[AUDIO] format={suffix} taille={len(audio_bytes)} bytes")
-
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(audio_bytes)
-        path = tmp.name
-
-    try:
-        with open(path, "rb") as f:
-            result = client.audio.transcriptions.create(
-                model="whisper-large-v3",
-                file=(f"audio{suffix}", f, mime),
-                response_format="text",   # ✅ "text" seulement — Groq ne supporte PAS verbose_json
-                prompt=(
-                    "Transcris exactement. Message en français ou wolof sénégalais. "
-                    "Wolof: nanga def, mangi fi, jërejëf, waaw, deedeet, dama, dafa, "
-                    "xam, dem, ñëw, lekk, wax, nekk, bi, yi, ci, ak, sama, bëgg, "
-                    "nataal, def ma, bind ma, xale, baay, yaay, xarit, mbokk, ndax, "
-                    "baal ma, yow, rekk, lool, daldi, yalla, incha allah. "
-                    "Tech: logo, image, avatar, créer, générer."
-                ),
-            )
-        # response_format="text" → retourne une string directement
-        text = result if isinstance(result, str) else getattr(result, "text", str(result))
-        print(f"[WHISPER] '{text[:80]}'")
-        return (text or "").strip()
-    finally:
-        os.unlink(path)
-
-# ─────────────────────────────────────────────────────────────
-# TEXT-TO-SPEECH — réponse audio via Groq TTS
-# ─────────────────────────────────────────────────────────────
-def text_to_speech(text: str, lang: str = "french") -> bytes | None:
-    """
-    Génère un fichier audio MP3 à partir du texte via Groq TTS.
-    Retourne les bytes audio ou None si échec.
-    """
-    try:
-        # Nettoyer le texte pour la synthèse
-        clean = (text
-            .replace("❌", "").replace("⏱️", "").replace("🎨", "")
-            .replace("🎙️", "").replace("✅", "").replace("📎", "")
-            .replace("**", "").replace("*", "").replace("#", "")
-            .replace("»", "").replace("«", "")
-            .strip()
-        )
-        if not clean:
-            return None
-
-        # Limiter à 500 caractères pour éviter timeout
-        if len(clean) > 500:
-            clean = clean[:497] + "..."
-
-        # Voix selon la langue
-        voice = "alloy"   # voix neutre, bonne pour fr + wolof
-
-        response = client.audio.speech.create(
-            model="playai-tts",          # modèle TTS Groq
-            voice=voice,
-            input=clean,
-            response_format="mp3",
-        )
-
-        # Récupérer les bytes audio
-        audio_bytes = response.read() if hasattr(response, "read") else bytes(response.content)
-        print(f"[TTS] {len(audio_bytes)} bytes générés")
-        return audio_bytes
-
-    except Exception as e:
-        print(f"[TTS ERR] {e}")
-        return None
-
-# ─────────────────────────────────────────────────────────────
-# PROMPTS SYSTÈME
-# ─────────────────────────────────────────────────────────────
-WOLOF_SYSTEM = """Tu es Yelen AI, assistant IA sénégalais chaleureux et moderne.
-Tu parles wolof et français comme un Dakarois.
-
-RÈGLES :
-1. Wolof → réponds EN WOLOF (simple, naturel, pas trop long)
-2. Mélange wolof-français → réponds dans le même style
-3. Français pur → réponds en français
-4. N'invente JAMAIS de mots wolof inexistants
-5. Sois concis et naturel
-RÈGLE TRÈS IMPORTANTE :
-
-Réponds uniquement à la demande de l'utilisateur.
-
-N'ajoute jamais d'informations qui n'ont pas été demandées.
-
-Ne développe pas inutilement.
-
-Pour une salutation, réponds uniquement par une salutation.
-
-Pour un merci, réponds uniquement par une formule de politesse.
-
-Pour une question courte, donne une réponse courte.
-
-N'essaie pas de poursuivre la conversation si l'utilisateur ne l'a pas demandé.
-
-WOLOF SIMPLE (utilise ces mots) :
-- Salut: "Nanga def?" / "Mangi fi rekk"
-- Merci: "Jërejëf" / "Jërejëf lool"
-- Oui: "Waaw" / Non: "Deedeet"
-- Bien: "Dafa baax" / Beau: "Dafa rafet"
-- Je comprends: "Xam naa"
-- D'accord: "Siiw" / "Waaw baax"
-- Pas de problème: "Amul solo"
-
-EXEMPLES :
-- "Nanga def?" → "Mangi fi rekk! Yow noo?"
-- "Dama bëgg logo" → "Waaw! Logo yu naan nga bëgg — restaurant, magasin walla lan?"
-- "Jërejëf" → "Amul solo! Lan lañu def?"
-"""
-
-FRENCH_SYSTEM = (
-    "Tu es Yelen AI, assistant IA africain intelligent et chaleureux. "
-    "Réponds en français, sois concis et utile. "
-    "Tu peux créer des images/logos, analyser des documents PDF/Word/Excel."
+# ─────────────────────────────────────────────
+# LANGUAGE / SYSTEM PROMPT
+# ─────────────────────────────────────────────
+SYSTEM_PROMPT = (
+    "Tu es Yelen AI, un assistant qui parle français et wolof.\n"
+    "Détecte automatiquement la langue du message de l'utilisateur "
+    "(français ou wolof) et réponds TOUJOURS dans cette même langue.\n"
+    "Si l'utilisateur écrit en wolof, fais de ton mieux pour répondre "
+    "entièrement en wolof, même si ta maîtrise du wolof est imparfaite : "
+    "ne bascule pas en français sauf si l'utilisateur te le demande "
+    "explicitement ou s'il mélange lui-même les deux langues.\n"
+    "Si l'utilisateur écrit en français, réponds en français."
 )
 
-# ─────────────────────────────────────────────────────────────
-# HANDLE CHAT
-# ─────────────────────────────────────────────────────────────
-def handle_chat(user_message: str, history: list) -> dict:
-    # 1. Image ?
-    intent = detect_image_intent(user_message)
-    if intent:
-        img = generate_image(intent["visual_prompt"], intent["type"])
-        if img:
-            return {
-                "response":      intent["confirmation_message"],
-                "has_image":     True,
-                "image_base64":  img,
-                "image_type":    intent["type"],
-                "visual_prompt": intent["visual_prompt"],
-            }
-        return {"response": "❌ Génération échouée. Réessaie."}
+# ─────────────────────────────────────────────
+# WOLOF : GLOSSAIRE + TRADUCTION "SANDWICH"
+# ─────────────────────────────────────────────
+# Llama 3.3 a une connaissance très limitée du wolof (corpus d'entraînement
+# quasi inexistant pour cette langue), donc :
+#   1) il comprend mal certains mots/expressions wolof envoyés par
+#      l'utilisateur (contresens, incompréhension totale)
+#   2) il génère un wolof approximatif, mélangé de français, avec un
+#      vocabulaire parfois inventé
+#
+# Stratégie retenue : "traduction sandwich"
+#   wolof (utilisateur) --[traduction guidée par glossaire]--> français
+#   --[LLM répond normalement en français, tâche qu'il maîtrise bien]-->
+#   français --[traduction guidée par glossaire]--> wolof (réponse finale)
+#
+# Une tâche de TRADUCTION (contrainte, avec du contexte lexical fourni)
+# est beaucoup plus fiable pour un LLM qu'une GÉNÉRATION libre dans une
+# langue peu représentée dans son corpus. On combine ça avec un glossaire
+# bilingue injecté dans le prompt pour forcer un vocabulaire correct et
+# cohérent des deux côtés (compréhension ET génération).
 
-    # 2. Langue
-    lang   = detect_language(user_message)
-    system = WOLOF_SYSTEM if lang == "wolof" else FRENCH_SYSTEM
+WOLOF_FR_GLOSSARY = """
+Glossaire wolof ↔ français (vocabulaire courant, à utiliser en priorité
+pour la traduction — respecte cette terminologie plutôt que d'improviser) :
 
-    # 3. LLM
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-10:]:
-        if msg.get("role") in ("user", "assistant") and msg.get("content"):
-            messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": user_message})
+Salutations / politesse :
+- Nanga def / Na nga def = Comment vas-tu / Comment ça va
+- Maa ngi fi (rekk) = Je vais bien (ça va)
+- Jërejëf = Merci
+- Amul solo = De rien / Ce n'est rien
+- Baal ma = Excuse-moi / Pardon
+- Ba beneen = À bientôt / Au revoir
 
+Oui / non / affirmations :
+- Waaw = Oui
+- Déedéet = Non
+- Dara = Rien
+- Baax na = D'accord / C'est bien
+- Xam naa = Je sais
+- Xamuma = Je ne sais pas
+- Mën naa = Je peux
+- Mënuma = Je ne peux pas
+
+Mots interrogatifs :
+- Naka = Comment
+- Lan / Lu = Quoi
+- Ndax = Est-ce que
+- Lu tax = Pourquoi
+- Fan / Ana = Où
+- Kañ = Quand
+- Kan = Qui
+- Ñaata = Combien
+
+Pronoms / personnes :
+- Man = Moi
+- Yow = Toi
+- Moom = Lui / Elle
+- Nun = Nous
+- Yeen = Vous
+- Ñoom = Eux
+
+Verbes / expressions utiles pour un assistant :
+- Dama bëgg / Da nga bëgg = Je veux / Tu veux
+- Dinaa (+ verbe) = Je vais (futur proche)
+- Wax = Parler / Dire
+- Dégg = Comprendre / Entendre
+- Xool = Regarder
+- Bind = Écrire
+- Jàng = Lire / Étudier
+- Yëg = Ressentir / Faire savoir
+- Bul jaaxle = Ne t'inquiète pas
+- Léegi = Maintenant
+- Tey = Aujourd'hui
+- Ëllëg = Demain
+- Démb = Hier
+- Su fekkee = Si (condition)
+- Bu bëgge = Si tu veux
+""".strip()
+
+
+# ─────────────────────────────────────────────
+# GLOSSAIRE APPRIS EN CONVERSATION (mémoire persistante)
+# ─────────────────────────────────────────────
+# Quand l'utilisateur enseigne un mot ("X veut dire Y"), on le sauvegarde
+# ici pour que le bot s'en souvienne dans les conversations futures — pas
+# seulement dans l'historique de la conversation en cours (le modèle n'a
+# aucune mémoire entre les requêtes HTTP).
+#
+# NB : c'est un glossaire GLOBAL (partagé entre tous les utilisateurs), il
+# n'y a pas de notion d'utilisateur/session dans cette API pour l'instant.
+# NB2 : sur un hébergeur avec disque éphémère (ex. Render free tier), ce
+# fichier peut être réinitialisé à chaque redéploiement — pour une mémoire
+# vraiment durable il faudrait une vraie base de données.
+LEARNED_GLOSSARY_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "learned_glossary.json"
+)
+_glossary_lock = threading.Lock()
+
+
+def _load_learned_glossary() -> dict:
+    try:
+        with open(LEARNED_GLOSSARY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_learned_glossary(data: dict):
+    tmp_path = LEARNED_GLOSSARY_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, LEARNED_GLOSSARY_PATH)
+
+
+def add_learned_words(pairs: list) -> list:
+    """
+    Ajoute une liste de {"wolof": ..., "french": ...} au glossaire appris.
+    Retourne la liste des paires effectivement ajoutées/mises à jour.
+    """
+    added = []
+    with _glossary_lock:
+        current = _load_learned_glossary()
+        for pair in pairs:
+            wl = (pair.get("wolof") or "").strip()
+            fr = (pair.get("french") or "").strip()
+            if not wl or not fr:
+                continue
+            current[wl.lower()] = {"wolof": wl, "french": fr}
+            added.append({"wolof": wl, "french": fr})
+        if added:
+            _save_learned_glossary(current)
+    return added
+
+
+def get_full_glossary_text() -> str:
+    """Glossaire statique + mots appris en conversation, prêt pour un prompt."""
+    learned = _load_learned_glossary()
+    if not learned:
+        return WOLOF_FR_GLOSSARY
+    learned_lines = "\n".join(
+        f"- {v['wolof']} = {v['french']}" for v in learned.values()
+    )
+    return (
+        f"{WOLOF_FR_GLOSSARY}\n\n"
+        "Mots appris récemment auprès de l'utilisateur (prioritaires, "
+        "à utiliser tels quels) :\n"
+        f"{learned_lines}"
+    )
+
+
+def get_learned_words() -> set:
+    return set(_load_learned_glossary().keys())
+
+
+# ─────────────────────────────────────────────
+# DÉTECTION D'UN MESSAGE "ENSEIGNEMENT" (l'utilisateur apprend un mot au bot)
+# ─────────────────────────────────────────────
+TEACHING_MARKERS = [
+    "veut dire", "ça veut dire", "ca veut dire", "veux dire",
+    "signifie", "sinifie", "ce qui veut dire", "mooy", " = ",
+    "retiens que", "retiens ça", "apprends", "en wolof on dit",
+    "en wolof ça dit", "ça se dit",
+]
+
+
+def looks_like_teaching(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(m in lowered for m in TEACHING_MARKERS)
+
+
+def extract_taught_pairs(text: str):
+    """
+    Utilise le LLM pour extraire les paires wolof/français que l'utilisateur
+    est en train d'enseigner dans son message (ex: "Jamm veut dire paix").
+    Retourne une liste de {"wolof":..., "french":...} (peut être vide).
+    Appelé uniquement quand looks_like_teaching() a déjà pré-filtré, pour
+    limiter les appels API inutiles.
+    """
+    instruction = (
+        "L'utilisateur est en train d'apprendre du vocabulaire wolof à un "
+        "assistant. Extrais toutes les paires mot/expression-wolof et "
+        "leur traduction française présentes dans son message.\n"
+        "Réponds STRICTEMENT avec un tableau JSON, sans aucun texte "
+        "autour, sans balises markdown, au format exact :\n"
+        '[{"wolof": "...", "french": "..."}]\n'
+        "Si aucune paire d'enseignement claire n'est présente, réponds : []"
+    )
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+            max_tokens=400,
+        )
+        raw = (r.choices[0].message.content or "").strip()
+        raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [p for p in parsed if isinstance(p, dict)]
+        return []
+    except Exception as e:
+        print("[TEACHING EXTRACT ERROR]", e)
+        return []
+
+
+def detect_wolof(text: str) -> bool:
+    """
+    Heuristique locale (rapide, sans appel API) pour repérer un message
+    probablement écrit en wolof, en cherchant des marqueurs très fréquents
+    (mots-outils, pronoms, interrogatifs) plutôt qu'un mot-clé isolé — plus
+    fiable que l'ancienne approche par mots-clés ponctuels.
+    Ce n'est qu'un pré-filtre : en cas de doute on part du principe que
+    c'est du français, et le SYSTEM_PROMPT sert de filet de sécurité pour
+    les cas mixtes ou mal détectés.
+    """
+    if not text:
+        return False
+
+    markers = [
+        "nanga", "def", "jërejëf", "jerejef", "waaw", "déedéet", "deedeet",
+        "dara", "naka", "ndax", "lu tax", "fan", "kañ", "kan", "ñaata",
+        "naata", "man", "yow", "moom", "nun", "yeen", "ñoom", "dama",
+        "bëgg", "begg", "dinaa", "wax", "dégg", "degg", "xool", "bind",
+        "jàng", "jang", "yëg", "yeg", "bul jaaxle", "léegi", "leegi",
+        "tey", "ëllëg", "ellëg", "ellek", "démb", "demb", "baal ma",
+        "mangi", "maa ngi", "xam naa", "xamuma", "mën naa", "menna",
+        "baax na",
+    ]
+
+    # Les mots appris en conversation comptent aussi comme marqueurs —
+    # sinon un mot enseigné par l'utilisateur ne serait jamais reconnu
+    # comme wolof dans les messages suivants.
+    markers = markers + list(get_learned_words())
+
+    lowered = text.lower()
+    hits = 0
+    for m in markers:
+        if not m:
+            continue
+        if re.search(rf"\b{re.escape(m)}\b", lowered):
+            hits += 1
+            if hits >= 1:
+                return True
+    return False
+
+
+def translate_text(text: str, direction: str):
+    """
+    Traduit `text` avec le LLM, guidé par le glossaire wolof/français.
+    direction : "wl_to_fr" ou "fr_to_wl".
+    Retourne le texte traduit, ou le texte original en cas d'échec
+    (fail-open : mieux vaut traiter le texte original que planter).
+    """
+    if not text or not text.strip():
+        return text
+
+    if direction == "wl_to_fr":
+        instruction = (
+            "Tu es un traducteur wolof → français. Traduis fidèlement le "
+            "texte suivant en français, en t'appuyant en PRIORITÉ sur le "
+            "glossaire fourni pour les termes qu'il couvre. Si un mot ne "
+            "figure pas dans le glossaire et que tu n'es pas sûr de son "
+            "sens, garde-le tel quel entre crochets (ex: [mot]) plutôt "
+            "que d'inventer une traduction — mieux vaut un trou visible "
+            "qu'un contresens. Réponds UNIQUEMENT avec la traduction, "
+            "sans commentaire, sans guillemets, sans répéter le texte "
+            "source, et ne dis jamais que tu ne comprends pas."
+        )
+    else:
+        instruction = (
+            "Tu es un traducteur français → wolof. Traduis fidèlement le "
+            "texte suivant en wolof, en t'appuyant EN PRIORITÉ sur le "
+            "glossaire fourni pour les termes qu'il couvre, et en gardant "
+            "un wolof naturel et cohérent (n'invente pas de mots, garde "
+            "en français les termes techniques/noms propres qui n'ont "
+            "pas d'équivalent connu). Réponds UNIQUEMENT avec la "
+            "traduction, sans commentaire, sans guillemets, sans répéter "
+            "le texte source."
+        )
+
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": f"{instruction}\n\n{get_full_glossary_text()}"},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2,
+            max_tokens=800,
+        )
+        translated = (r.choices[0].message.content or "").strip()
+        return translated if translated else text
+    except Exception as e:
+        print("[TRANSLATE ERROR]", direction, e)
+        return text
+
+# ─────────────────────────────────────────────
+# IMAGE GENERATION
+# ─────────────────────────────────────────────
+def generate_image(prompt: str, gen_type: str):
+    full_prompt = TYPE_PROMPTS.get(gen_type, "") + prompt
+    encoded = urllib.parse.quote(full_prompt)
+
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024"
+
+    try:
+        res = requests.get(url, timeout=60)
+        return base64.b64encode(res.content).decode()
+    except Exception as e:
+        print("[IMAGE ERROR]", e)
+        return None
+
+# ─────────────────────────────────────────────
+# IMAGE VISION (analyse d'une image envoyée par l'utilisateur)
+# ─────────────────────────────────────────────
+def _detect_image_mime(raw_bytes: bytes) -> str:
+    """Détecte le type MIME réel à partir des premiers octets (signature de fichier)."""
+    if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw_bytes.startswith(b"GIF87a") or raw_bytes.startswith(b"GIF89a"):
+        return "image/gif"
+    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    # Par défaut : jpeg (format le plus courant depuis les galeries mobiles)
+    return "image/jpeg"
+
+
+def analyze_image_base64(image_base64: str, question: str):
+    """
+    Envoie l'image (base64) + une question à un modèle vision via Groq
+    (Llama 4 Scout) et retourne la réponse texte du modèle, ou None en
+    cas d'échec.
+    """
+    try:
+        raw_bytes = base64.b64decode(image_base64)
+        mime = _detect_image_mime(raw_bytes)
+        data_url = f"data:{mime};base64,{image_base64}"
+        r = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            temperature=0.5,
+            max_tokens=600,
+        )
+        return r.choices[0].message.content
+    except Exception as e:
+        print("[VISION ERROR]", e)
+        return None
+
+# ─────────────────────────────────────────────
+# DOCUMENT (extraction + analyse de PDF)
+# ─────────────────────────────────────────────
+MAX_DOC_CHARS = 15000  # limite de texte envoyée au LLM pour rester dans le contexte
+
+def extract_pdf_text(pdf_base64: str):
+    """
+    Décode un PDF en base64 et en extrait le texte (toutes pages, tronqué
+    si trop long). Retourne (texte, erreur) ; texte est None si l'extraction
+    échoue (PDF scanné sans texte, fichier corrompu, etc.).
+    """
+    try:
+        raw_bytes = base64.b64decode(pdf_base64)
+        reader = PdfReader(io.BytesIO(raw_bytes))
+
+        if reader.is_encrypted:
+            return None, "Le PDF est protégé par mot de passe."
+
+        pages_text = []
+        for page in reader.pages:
+            try:
+                pages_text.append(page.extract_text() or "")
+            except Exception:
+                continue
+
+        full_text = "\n\n".join(t for t in pages_text if t.strip())
+
+        if not full_text.strip():
+            return None, "Aucun texte détecté (le PDF est probablement une image scannée)."
+
+        if len(full_text) > MAX_DOC_CHARS:
+            full_text = full_text[:MAX_DOC_CHARS] + "\n\n[...document tronqué, trop long...]"
+
+        return full_text, None
+
+    except Exception as e:
+        print("[PDF ERROR]", e)
+        return None, f"Impossible de lire ce PDF : {e}"
+
+
+def analyze_document(doc_text: str, question: str):
+    """
+    Envoie le texte extrait du document + la question de l'utilisateur au
+    LLM. Si la question est en wolof, on la traduit en français avant de
+    l'envoyer (le document lui-même reste en français : c'est la langue
+    dans laquelle le modèle raisonne le mieux), puis on retraduit la
+    réponse en wolof.
+    """
+    is_wolof = detect_wolof(question)
+    question_fr = translate_text(question, "wl_to_fr") if is_wolof else question
+
+    try:
+        prompt = (
+            "Voici le contenu d'un document fourni par l'utilisateur :\n\n"
+            f"---\n{doc_text}\n---\n\n"
+            f"Question de l'utilisateur : {question_fr}"
+        )
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+            max_tokens=700,
+        )
+        answer = r.choices[0].message.content
+    except Exception as e:
+        print("[DOC ANALYSIS ERROR]", e)
+        return None
+
+    if is_wolof and answer:
+        answer = translate_text(answer, "fr_to_wl")
+
+    return answer
+
+# ─────────────────────────────────────────────
+# TEXT TO SPEECH
+# ─────────────────────────────────────────────
+def _edge_tts_sync(text: str, voice: str, out_path: str):
+    """Wrapper synchrone pour edge_tts (lib asyncio)."""
+    async def _run():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(out_path)
+    asyncio.run(_run())
+
+
+def text_to_speech_base64(text: str, lang: str = "fr", max_retries: int = 2):
+    """
+    Génère un mp3 de la réponse.
+
+    Priorité 1 : edge-tts — s'appuie sur l'infrastructure officielle de
+    synthèse vocale de Microsoft Edge (Read Aloud), beaucoup plus stable
+    en environnement serveur/cloud que gTTS.
+
+    Priorité 2 (fallback) : gTTS — endpoint non-officiel de Google
+    Translate ; peut renvoyer 403/429 selon l'IP sortante de l'hébergeur
+    (observé sur certaines IP partagées de type Render).
+
+    NB voix : ni edge-tts ni gTTS n'ont de voix wolof dédiée. On utilise la
+    voix française même pour du texte wolof (prononciation approximative,
+    mais reste compréhensible) — c'est une limitation connue, indépendante
+    du problème de qualité texte traité ici.
+
+    Retourne (audio_base64, message_erreur). message_erreur est None en
+    cas de succès, sinon contient le détail des deux échecs pour debug
+    direct dans les logs serveur / réponse JSON.
+    """
+    voice = "fr-FR-DeniseNeural"
+    errors = []
+
+    # ── Tentative 1 : edge-tts ──
+    for attempt in range(max_retries + 1):
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            _edge_tts_sync(text, voice, tmp_path)
+
+            with open(tmp_path, "rb") as f:
+                audio_bytes = f.read()
+
+            if not audio_bytes:
+                raise ValueError("fichier audio vide généré par edge-tts")
+
+            return base64.b64encode(audio_bytes).decode(), None
+
+        except Exception as e:
+            err = f"edge-tts tentative {attempt + 1}: {type(e).__name__}: {e}"
+            print("[TTS ERROR]", err)
+            errors.append(err)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    # ── Tentative 2 (fallback) : gTTS ──
+    for attempt in range(max_retries + 1):
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            tts = gTTS(text=text, lang=lang)
+            tts.save(tmp_path)
+
+            with open(tmp_path, "rb") as f:
+                audio_bytes = f.read()
+
+            if not audio_bytes:
+                raise ValueError("fichier audio vide généré par gTTS")
+
+            return base64.b64encode(audio_bytes).decode(), None
+
+        except Exception as e:
+            err = f"gTTS tentative {attempt + 1}: {type(e).__name__}: {e}"
+            print("[TTS ERROR]", err)
+            errors.append(err)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    return None, " | ".join(errors)
+
+# ─────────────────────────────────────────────
+# SPEECH TO TEXT (Whisper via Groq)
+# ─────────────────────────────────────────────
+def transcribe_audio_base64(audio_base64: str):
+    """
+    Décode l'audio reçu en base64 (m4a/webm depuis le mobile) et le transcrit
+    avec Whisper (Groq). Retourne le texte transcrit ou None en cas d'échec.
+    """
+    tmp_path = None
+    try:
+        audio_bytes = base64.b64decode(audio_base64)
+
+        # On écrit en .m4a (format envoyé par l'app mobile iOS/Android).
+        # Whisper/Groq se base sur le contenu réel du fichier, l'extension
+        # sert surtout à l'API pour deviner le type — m4a est accepté.
+        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as f:
+            transcription = client.audio.transcriptions.create(
+                file=(os.path.basename(tmp_path), f.read()),
+                model="whisper-large-v3-turbo",
+                response_format="text",
+            )
+
+        # Le SDK Groq peut renvoyer soit une string, soit un objet avec .text
+        text = transcription if isinstance(transcription, str) else getattr(transcription, "text", "")
+        return text.strip() if text else None
+
+    except Exception as e:
+        print("[STT ERROR]", e)
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+CONFUSION_MARKERS = [
+    "je ne comprends pas", "je ne comprend pas", "je n'ai pas compris",
+    "je ne saisis pas", "pourriez-vous reformuler", "peux-tu reformuler",
+    "pouvez-vous préciser", "peux-tu préciser", "qu'est-ce que vous voulez dire",
+    "qu'est-ce que tu veux dire", "je ne sais pas ce que", "pas sûr de comprendre",
+]
+
+
+def _looks_confused(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(m in lowered for m in CONFUSION_MARKERS)
+
+
+def _run_chat_completion(working_message: str, history: list):
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += history[-10:]
+    messages.append({"role": "user", "content": working_message})
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
         temperature=0.7,
-        max_tokens=400,
+        max_tokens=600,
     )
-    return {"response": r.choices[0].message.content, "lang": lang}
+    return r.choices[0].message.content
 
-# ─────────────────────────────────────────────────────────────
-# KEEP-ALIVE
-# ─────────────────────────────────────────────────────────────
-@app.route("/ping", methods=["GET"])
+
+# ─────────────────────────────────────────────
+# CHAT HANDLER
+# ─────────────────────────────────────────────
+def handle_chat(user_message: str, history: list, want_audio_response: bool = False):
+    intent = detect_image_intent(user_message)
+
+    if intent:
+        img = generate_image(intent["visual_prompt"], intent["type"])
+        return {
+            "response": intent["confirmation_message"],
+            "has_image": True,
+            "image_base64": img,
+            "image_type": intent["type"],
+            "visual_prompt": intent["visual_prompt"],
+        }
+
+    # ── Cas "enseignement" : l'utilisateur apprend un mot/une expression
+    # wolof au bot ("Jamm veut dire paix"). On l'extrait et on le sauvegarde
+    # dans le glossaire persistant, au lieu de laisser partir le message
+    # vers le chat normal (où il finit souvent en "je ne comprends pas").
+    if looks_like_teaching(user_message):
+        pairs = extract_taught_pairs(user_message)
+        added = add_learned_words(pairs)
+        if added:
+            lines = "\n".join(f"• « {p['wolof']} » = « {p['french']} »" for p in added)
+            confirmation = (
+                f"✅ Merci, j'ai retenu :\n{lines}\n\n"
+                "Je m'en servirai dans nos prochaines conversations."
+            )
+            result = {"response": confirmation, "learned": added}
+            if want_audio_response:
+                audio_b64, tts_error = text_to_speech_base64(confirmation)
+                result["audio_base64"] = audio_b64
+                if tts_error:
+                    result["tts_error"] = tts_error
+            return result
+        # Le message ressemblait à un enseignement mais rien d'exploitable
+        # n'a été extrait (ex: LLM indécis) → on retombe sur le flux normal.
+
+    # ── Traduction "sandwich" pour le wolof ──
+    # On traite le message en français (langue que le modèle maîtrise
+    # bien), puis on retraduit la réponse en wolof si besoin. C'est plus
+    # fiable qu'une génération directe en wolof, et ça évite les
+    # contresens dus à une mauvaise compréhension du wolof en entrée.
+    is_wolof = detect_wolof(user_message)
+    working_message = translate_text(user_message, "wl_to_fr") if is_wolof else user_message
+
+    response_text = _run_chat_completion(working_message, history)
+
+    # ── Filet de sécurité : si le message n'a pas été détecté comme wolof
+    # (mot absent des marqueurs/glossaire) mais que le modèle répond par
+    # une formule d'incompréhension, on retente en forçant le chemin de
+    # traduction wolof → français avant de répondre. Ça rattrape les mots
+    # wolof que l'heuristique locale n'a pas reconnus.
+    if not is_wolof and _looks_confused(response_text):
+        retried_message = translate_text(user_message, "wl_to_fr")
+        if retried_message.strip().lower() != working_message.strip().lower():
+            is_wolof = True
+            response_text = _run_chat_completion(retried_message, history)
+
+    if is_wolof and response_text:
+        response_text = translate_text(response_text, "fr_to_wl")
+
+    result = {"response": response_text}
+
+    # On ne génère l'audio de réponse que si le client le demande
+    # (ex: l'utilisateur a envoyé un vocal) pour ne pas surcharger
+    # inutilement les requêtes texte classiques si besoin de couper ce comportement.
+    if want_audio_response:
+        audio_b64, tts_error = text_to_speech_base64(response_text)
+        result["audio_base64"] = audio_b64
+        if tts_error:
+            # Visible dans les logs Render ET dans la réponse, pour debug rapide.
+            print("[TTS] échec définitif après retries :", tts_error)
+            result["tts_error"] = tts_error
+
+    return result
+
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
+@app.route("/ping")
 def ping():
-    return "pong", 200
+    return "pong"
 
-# ─────────────────────────────────────────────────────────────
-# ROUTE /tts — Text to Speech séparé
-# ─────────────────────────────────────────────────────────────
 @app.route("/tts", methods=["POST"])
-def tts_route():
-    """Endpoint dédié TTS : reçoit {text, lang} → retourne audio/mpeg"""
-    data = request.get_json()
-    if not data or not data.get("text"):
-        return jsonify({"error": "text manquant"}), 400
+def tts():
+    """
+    Génère l'audio d'un texte à la demande (bouton "écouter" sur un message
+    bot déjà affiché). Le texte est fourni par le client — pas besoin de
+    repasser par le LLM, on synthétise directement.
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
 
-    text = data.get("text", "")
-    lang = data.get("lang", "french")
+    if not text:
+        return jsonify({"error": "texte manquant"}), 400
 
-    audio_bytes = text_to_speech(text, lang)
-    if not audio_bytes:
-        return jsonify({"error": "TTS échoué"}), 500
+    if len(text) > 4000:
+        text = text[:4000]
 
-    # Retourner l'audio en base64 pour le frontend mobile
-    audio_b64 = base64.b64encode(audio_bytes).decode()
-    return jsonify({"audio_base64": audio_b64, "format": "mp3"})
+    audio_b64, tts_error = text_to_speech_base64(text)
 
-# ─────────────────────────────────────────────────────────────
-# ROUTE /chat
-# ─────────────────────────────────────────────────────────────
+    if not audio_b64:
+        return jsonify({"error": tts_error or "échec de la synthèse vocale"}), 502
+
+    return jsonify({"audio_base64": audio_b64})
+
+@app.route("/glossary", methods=["GET"])
+def glossary():
+    """Debug : liste des mots wolof appris en conversation."""
+    return jsonify({"learned": list(_load_learned_glossary().values())})
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "invalid request"}), 400
+    data = request.get_json(silent=True) or {}
 
-    user_message  = data.get("message", "")
-    has_image     = data.get("has_image", False)
-    image_base64  = data.get("image_base64")
-    has_audio     = data.get("has_audio", False)
-    audio_base64  = data.get("audio_base64")
-    has_document  = data.get("has_document", False)
-    doc_base64    = data.get("doc_base64")
-    doc_filename  = data.get("doc_filename", "document.txt")
-    history       = data.get("history", [])
-    want_tts      = data.get("tts", False)   # ← frontend demande réponse audio
+    has_audio = bool(data.get("has_audio"))
+    audio_base64 = data.get("audio_base64")
+    has_image = bool(data.get("has_image"))
+    image_base64 = data.get("image_base64")
+    has_document = bool(data.get("has_document"))
+    document_base64 = data.get("document_base64")
+    history = data.get("history", [])
 
-    # ── 🎙 AUDIO ──
-    if has_audio and audio_base64:
-        try:
-            audio_bytes = base64.b64decode(audio_base64)
-            if len(audio_bytes) < 500:
-                return jsonify({"response": "❌ Audio trop court. Parle plus longtemps."})
+    # ── Cas document : extraction texte + analyse, pas besoin de passer par handle_chat ──
+    if has_document:
+        if not document_base64:
+            return jsonify({"error": "document manquant"}), 400
 
-            transcribed = transcribe_audio(audio_bytes)
-            print("[TRANSCRIPTION]", repr(transcribed))
+        doc_text, doc_error = extract_pdf_text(document_base64)
 
-            if not transcribed or len(transcribed.strip()) < 2:
-                return jsonify({"response": "❌ Audio non reconnu. Rapproche-toi du micro."})
-
-            result = handle_chat(transcribed, history)
-            result["transcription"] = transcribed
-
-            # TTS automatique pour les réponses vocales
-            if result.get("response") and not result.get("has_image"):
-                lang = result.get("lang", "french")
-                audio_resp = text_to_speech(result["response"], lang)
-                if audio_resp:
-                    result["response_audio_b64"] = base64.b64encode(audio_resp).decode()
-                    result["response_audio_format"] = "mp3"
-
-            return jsonify(result)
-
-        except Exception as e:
-            print("[AUDIO ERR]", e)
-            return jsonify({"response": f"❌ Erreur audio : {str(e)}"})
-
-    # ── 📄 DOCUMENT ──
-    if has_document and doc_base64:
-        try:
-            doc_bytes = base64.b64decode(doc_base64)
-            doc_text  = extract_text_from_document(doc_bytes, doc_filename)
-
-            if doc_text.startswith("❌"):
-                return jsonify({"response": doc_text})
-
-            question = user_message.strip() or "Fais un résumé complet de ce document."
-            lang     = detect_language(question)
-
-            system = (
-                "Tu es Yelen AI, expert en analyse de documents. "
-                "Analyse le document fourni et réponds précisément. "
-                f"Réponds en {'wolof et français' if lang == 'wolof' else 'français'}."
-            )
-            prompt = f'Document "{doc_filename}" :\n\n---\n{doc_text[:12000]}\n---\n\nQuestion : {question}'
-
-            r = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user",   "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=1000,
-            )
+        if not doc_text:
             return jsonify({
-                "response":     r.choices[0].message.content,
-                "has_document": True,
-                "doc_filename": doc_filename,
-            })
-        except Exception as e:
-            print("[DOC ERR]", e)
-            return jsonify({"response": f"❌ Erreur document : {str(e)}"})
+                "error": doc_error or "Impossible de lire ce document",
+                "response": f"❌ {doc_error or 'Je n’ai pas pu lire ce document.'}",
+            }), 200
 
-    # ── 🖼 ANALYSE IMAGE ──
-    if has_image and image_base64:
-        try:
-            if "," in image_base64:
-                image_base64 = image_base64.split(",", 1)[1]
-            if len(image_base64) < 100:
-                return jsonify({"response": "❌ Image invalide."})
+        question = (data.get("message") or "Résume ce document en français.").strip()
+        response_text = analyze_document(doc_text, question)
 
-            mime     = get_mime(image_base64)
-            question = user_message.strip() or "Décris cette image en détail en français."
+        if not response_text:
+            return jsonify({
+                "error": "Impossible d'analyser le document",
+                "response": "❌ Je n'ai pas réussi à analyser ce document, réessaie.",
+            }), 200
 
-            for model in [
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "meta-llama/llama-4-maverick-17b-128e-instruct",
-            ]:
-                try:
-                    r = client.chat.completions.create(
-                        model=model,
-                        messages=[{"role": "user", "content": [
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_base64}"}},
-                            {"type": "text", "text": question},
-                        ]}],
-                        max_tokens=1024,
-                    )
-                    return jsonify({"response": r.choices[0].message.content})
-                except Exception as e:
-                    print(f"[IMG ERR] {model}: {e}")
-                    continue
+        return jsonify({"response": response_text})
 
-            return jsonify({"response": "❌ Analyse image impossible."})
-        except Exception as e:
-            return jsonify({"response": f"❌ Erreur : {str(e)}"})
+    # ── Cas image : analyse vision directe, pas besoin de passer par handle_chat ──
+    if has_image:
+        if not image_base64:
+            return jsonify({"error": "image manquante"}), 400
 
-    # ── 💬 TEXTE ──
+        question = (data.get("message") or "Décris cette image en détail en français.").strip()
+        response_text = analyze_image_base64(image_base64, question)
+
+        if not response_text:
+            return jsonify({
+                "error": "Impossible d'analyser l'image",
+                "response": "❌ Je n'ai pas réussi à analyser cette image, réessaie.",
+            }), 200
+
+        return jsonify({"response": response_text})
+
+    transcription = None
+
+    if has_audio:
+        if not audio_base64:
+            return jsonify({"error": "audio manquant"}), 400
+
+        transcription = transcribe_audio_base64(audio_base64)
+
+        if not transcription:
+            return jsonify({
+                "error": "Impossible de transcrire l'audio",
+                "response": "❌ Je n'ai pas réussi à comprendre le message vocal, réessaie.",
+            }), 200
+
+        user_message = transcription
+    else:
+        user_message = data.get("message", "")
+
     if not user_message.strip():
-        return jsonify({"response": "❌ Message vide."})
+        return jsonify({"error": "empty message"}), 400
 
     try:
-        result = handle_chat(user_message, history)
-
-        # TTS si demandé et pas d'image
-        if want_tts and result.get("response") and not result.get("has_image"):
-            lang = result.get("lang", "french")
-            audio_resp = text_to_speech(result["response"], lang)
-            if audio_resp:
-                result["response_audio_b64"]    = base64.b64encode(audio_resp).decode()
-                result["response_audio_format"] = "mp3"
-
+        result = handle_chat(user_message, history, want_audio_response=has_audio)
+        if transcription:
+            result["transcription"] = transcription
         return jsonify(result)
     except Exception as e:
-        print("[CHAT ERR]", e)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/")
 def home():
     return "Yelen AI API 🌟"
 
-
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
