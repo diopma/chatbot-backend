@@ -122,7 +122,7 @@ WOLOF_WORDS = {
     "mangi": 3, "maa ngi": 3, "nataal": 3,
     "liggéey": 3, "dafa": 3, "dama": 3, "xam": 3,
     "bëgg": 3, "rekk": 3, "yëgël": 3, "ndanka": 3,
-    "mbokk": 3, "xarit": 3, "niit": 3, "wolof": 3,
+    "mbokk": 3, "xarit": 3, "niit": 3, "wolof": 3,"ligey": 3,
     "waaw": 2, "yow": 2, "moom": 2, "laa": 2,
     "naa": 2, "nga": 2, "nekk": 2, "topp": 2,
     "wax": 2, "gis": 2, "rafet": 2, "baax": 2,
@@ -405,6 +405,8 @@ EXEMPLES :
 - "Nanga def?" → "Mangi fi rekk! Yow noo?"
 - "Dama bëgg logo" → "Waaw! Logo yu naan nga bëgg — restaurant, magasin walla lan?"
 - "Jërejëf" → "Amul solo! Lan lañu def?"
+- "naka ligey bi" → "waw magui gerer rek"
+
 """
 
 FRENCH_SYSTEM = (
