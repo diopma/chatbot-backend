@@ -113,55 +113,34 @@ def detect_image_intent(msg: str) -> dict | None:
 # ─────────────────────────────────────────────────────────────
 # DÉTECTION LANGUE
 # ─────────────────────────────────────────────────────────────
-WOLOF_EXPRESSIONS = {
-    # Salutations
-    "nanga def":10,
-    "na nga def":10,
-    "noo ko def":10,
-    "jam nga am":10,
-    "asalaamaalekum":10,
-    "maalekum salaam":10,
-
-    # Réponses
-    "mangi fi":8,
-    "mangi fi rekk":10,
-    "maa ngi fi":10,
-    "maa ngi ci kanam":8,
-
-    # Questions
-    "lu xew":8,
-    "lu bees":8,
-    "fan nga dem":8,
-    "lan ngay def":8,
-    "ana sa kër":8,
-    "ana waa kër gi":8,
-    "nan nga ko def":8,
-
-    # Expressions
-    "dafa baax":8,
-    "dafa neex":8,
-    "dafa rafet":8,
-    "amul solo":8,
-    "xam naa":8,
-    "xamuma":8,
-    "dama bëgg":8,
-    "dama sonn":8,
-    "dama xiif":8,
-    "dama mar":8,
+WOLOF_WORDS = {
+    "nanga def": 4, "mangi fi rekk": 4, "jërejëf lool": 4,
+    "maa ngi fi": 4, "dafa baax": 4, "dafa neex": 4,
+    "xam naa": 4, "amul solo": 4, "def ma": 4, "bind ma": 4,
+    "soo bëgg": 4, "bëgg naa": 4, "waaw waaw": 4,
+    "jërejëf": 3, "baal ma": 3, "deedeet": 3,
+    "mangi": 3, "maa ngi": 3, "nataal": 3,
+    "liggéey": 3, "dafa": 3, "dama": 3, "xam": 3,
+    "bëgg": 3, "rekk": 3, "yëgël": 3, "ndanka": 3,
+    "mbokk": 3, "xarit": 3, "niit": 3, "wolof": 3,
+    "waaw": 2, "yow": 2, "moom": 2, "laa": 2,
+    "naa": 2, "nga": 2, "nekk": 2, "topp": 2,
+    "wax": 2, "gis": 2, "rafet": 2, "baax": 2,
+    "neex": 2, "ndax": 2, "waaye": 2, "tey": 2,
+    "jaay": 2, "jënd": 2, "daldi": 2, "seet": 2,
+    "dem": 1, "ñëw": 1, "lekk": 1, "dox": 1,
+    "fëkk": 1, "bind": 1, "jëf": 1, "tëdd": 1,
+    "ak": 1, "sama": 1, "seen": 1, "ci": 1,
+    "bi": 1, "yi": 1, "bu": 1, "baay": 1,
+    "yaay": 1, "xale": 1, "goor": 1, "benn": 1,
+    "ñaar": 1, "ñett": 1, "juróom": 1, "lool": 1,
+    "sunu": 1, "def": 1, "am": 1, "yalla": 2,
+    "incha allah": 2, "baraka": 2,
 }
+
 def detect_language(text: str) -> str:
     t = text.lower()
-
-wolof_score = 0
-
-for exp, score in WOLOF_EXPRESSIONS.items():
-    if exp in t:
-        wolof_score += score
-
-for word, score in WOLOF_WORDS.items():
-    if f" {word} " in f" {t} ":
-        wolof_score += score
-
+    wolof_score = sum(w for m, w in WOLOF_WORDS.items() if m in t)
     french_words = [
         "je", "tu", "il", "elle", "nous", "vous", "les", "des",
         "une", "est", "avec", "bonjour", "merci", "comment",
@@ -386,54 +365,44 @@ def text_to_speech(text: str, lang: str = "french") -> bytes | None:
 # ─────────────────────────────────────────────────────────────
 # PROMPTS SYSTÈME
 # ─────────────────────────────────────────────────────────────
-WOLOF_SYSTEM = """
-Tu es Yelen AI.
+WOLOF_SYSTEM = """Tu es Yelen AI, assistant IA sénégalais chaleureux et moderne.
+Tu parles wolof et français comme un Dakarois.
 
-Tu parles le wolof naturel utilisé au Sénégal.
+RÈGLES :
+1. Wolof → réponds EN WOLOF (simple, naturel, pas trop long)
+2. Mélange wolof-français → réponds dans le même style
+3. Français pur → réponds en français
+4. N'invente JAMAIS de mots wolof inexistants
+5. Sois concis et naturel
+RÈGLE TRÈS IMPORTANTE :
 
-Règles :
+Réponds uniquement à la demande de l'utilisateur.
 
-- parle comme un Sénégalais
-- utilise les expressions courantes
-- ne traduis jamais mot à mot le français
-- réponds de façon naturelle
-- si l'utilisateur mélange français et wolof, fais pareil
-- n'invente jamais de mots
-- sois poli
-- sois chaleureux
-- reste concis
+N'ajoute jamais d'informations qui n'ont pas été demandées.
 
-Exemples
+Ne développe pas inutilement.
 
-Utilisateur :
-Nanga def
+Pour une salutation, réponds uniquement par une salutation.
 
-Assistant :
-Mangi fi rekk. Yow nag ?
+Pour un merci, réponds uniquement par une formule de politesse.
 
-Utilisateur :
-Lu xew ?
+Pour une question courte, donne une réponse courte.
 
-Assistant :
-Amul dara.
+N'essaie pas de poursuivre la conversation si l'utilisateur ne l'a pas demandé.
 
-Utilisateur :
-Fan nga dem ?
+WOLOF SIMPLE (utilise ces mots) :
+- Salut: "Nanga def?" / "Mangi fi rekk"
+- Merci: "Jërejëf" / "Jërejëf lool"
+- Oui: "Waaw" / Non: "Deedeet"
+- Bien: "Dafa baax" / Beau: "Dafa rafet"
+- Je comprends: "Xam naa"
+- D'accord: "Siiw" / "Waaw baax"
+- Pas de problème: "Amul solo"
 
-Assistant :
-Dem naa liggéey.
-
-Utilisateur :
-Jërejëf
-
-Assistant :
-Amul solo.
-
-Utilisateur :
-Dama bëgg jënd téléphone.
-
-Assistant :
-Waaw. Ban téléphone nga bëgg ?
+EXEMPLES :
+- "Nanga def?" → "Mangi fi rekk! Yow noo?"
+- "Dama bëgg logo" → "Waaw! Logo yu naan nga bëgg — restaurant, magasin walla lan?"
+- "Jërejëf" → "Amul solo! Lan lañu def?"
 """
 
 FRENCH_SYSTEM = (
@@ -445,52 +414,23 @@ FRENCH_SYSTEM = (
 # ─────────────────────────────────────────────────────────────
 # HANDLE CHAT
 # ─────────────────────────────────────────────────────────────
-COMMON_WOLOF = {
-
-    "nanga def":
-        "Mangi fi rekk. Yow nag?",
-
-    "na nga def":
-        "Mangi fi rekk. Yow nag?",
-
-    "lu xew":
-        "Amul dara.",
-
-    "lu bees":
-        "Amul dara.",
-
-    "jërejëf":
-        "Amul solo.",
-
-    "baal ma":
-        "Amul solo.",
-
-    "waaw":
-        "Waaw.",
-
-    "deedeet":
-        "Deedeet.",
-
-}
 def handle_chat(user_message: str, history: list) -> dict:
-
     # 1. Image ?
     intent = detect_image_intent(user_message)
     if intent:
-        ...
+        img = generate_image(intent["visual_prompt"], intent["type"])
+        if img:
+            return {
+                "response":      intent["confirmation_message"],
+                "has_image":     True,
+                "image_base64":  img,
+                "image_type":    intent["type"],
+                "visual_prompt": intent["visual_prompt"],
+            }
         return {"response": "❌ Génération échouée. Réessaie."}
 
-    # Réponses rapides en wolof
-    msg = user_message.lower().strip()
-
-    if msg in COMMON_WOLOF:
-        return {
-            "response": COMMON_WOLOF[msg],
-            "lang": "wolof"
-        }
-
     # 2. Langue
-    lang = detect_language(user_message)
+    lang   = detect_language(user_message)
     system = WOLOF_SYSTEM if lang == "wolof" else FRENCH_SYSTEM
 
     # 3. LLM
