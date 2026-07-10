@@ -586,8 +586,8 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     # (un seul appel supplémentaire, uniquement si la réponse contient
     #  trop de français détecté — heuristique simple sur des mots courants)
 
-if lang == "wo":
-    response_text = client.chat.completions.create(
+    if lang == "wo":
+        response_text = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
             {
