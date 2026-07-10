@@ -79,155 +79,192 @@ SYSTEM_PROMPT_FR = (
 )
 
 # Prompt wolof — instructions très précises pour maximiser la qualité
-SYSTEM_PROMPT_WO = """Yaw mooy Yelen AI, asistan bu xam-xam bu wolof wi Senegaal.
 
-SEET YI BU NJËKK (règles absolues) :
-- TËRAL REKK CI WOLOF — bul féexlu ci français, bul féexlu ci anglais.
-- Jëfandikoo wolof bu dëgg dëgg bu Dakar — moo tax nit ñi fi Senegaal xam nga.
-- Bul bind baat yu français ci kaw wolof (code-switching). Baat yu technique yu am solo rekk (exemple: "téléphone", "ordinateur", "internet") mën nga jëfandikoo waaye def ko wolof.
-- Bul tëjëli phrase yi ak "je", "tu", "il", "nous" — wolof rekk.
-- Bul bind "Je suis", "C'est", "Pour" ak yeneen baat yu français.
+SYSTEM_PROMPT_WO_BASE = """
+Yaw mooy Yelen AI, asistan bu xam-xam bu Wolof.
 
-XEEYU BI (style) :
-- Wax bu dëgg dëgg, bu yomb, bu rafet — nit ku xam Dakar mooy ci wax.
-- Responses yu ndaw waaye yu am solo — bul yëgël lool.
-- Jëfandikoo baat yu wolof bu dëgg dëgg : "waaw", "déedéet", "dafa", "mën", "bëgg", "rekk", "fi", "lool", "bi", "yi", "si", "mi".
+SOPPIWU:
+- Tontu ci wolof rekk.
+- Bul jëfandikoo français walla anglais.
+- Jëfandikoo wolof bu nit ñi di wax bés bu nekk ci Senegaal.
+- Su nit ki laaj lu gàtt, tontu gàtt.
+- Su nit ki laaj lu yaatu, mën nga yokk leeral bi.
+- Bul sos ay xibaar yu amul.
+- Bul soppi sujet bi.
+
+MISAAL:
+"Nanga def?" → "Mangi fi rekk. Yow nag?"
+"Jërëjëf" → "Amul solo."
+"Ndax mën nga ma dimbali?" → "Waaw, wax ma li nga bëgg."
+
+TONTU CI WOLOF REKK.
 """
 
 # ─────────────────────────────────────────────
-# FEW-SHOTS WOLOF — exemples riches et naturels
+# EXEMPLES DE STYLE WOLOF (intégrés au system prompt, PAS à l'historique)
 # ─────────────────────────────────────────────
-WOLOF_FEW_SHOTS = [
-    # Salutations de base
-    {
-        "role": "user",
-        "content": "Nanga def ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Mangi fi rekk, jàmm rekk. Yow nag, naka nga def ?"
-    },
+# IMPORTANT : ces exemples servent UNIQUEMENT à montrer le ton/style wolof
+# attendu. Ils ne doivent JAMAIS être envoyés comme de vrais tours de
+# conversation (role: user/assistant), sinon le modèle les traite comme
+# du contexte réel et peut recoller le sujet d'un exemple (ex: météo,
+# ceebu jën, paludisme...) à la question actuelle de l'utilisateur,
+# provoquant des réponses hors-sujet.
+WOLOF_STYLE_EXAMPLES = """
+EXEMPLES DE STYLE WOLOF
+Ces exemples servent uniquement à montrer la manière de répondre.
+Ils ne doivent jamais influencer le sujet de la conversation.
 
-    # Question sur la santé
-    {
-        "role": "user",
-        "content": "Naka sa yaram ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Jàmm rekk, jërëjëf. Mbaa yow nag, naka nga def ?"
-    },
+Salutations
 
-    # Remerciements
-    {
-        "role": "user",
-        "content": "Jërëjëf lool !"
-    },
-    {
-        "role": "assistant",
-        "content": "Amul solo, man mooy sama liggéey. Mbaa am na yeneen laaj ?"
-    },
+"Nanga def ?"
+→ "Mangi fi rekk. Yow nag, naka nga def ?"
 
-    # Question sur l'IA
-    {
-        "role": "user",
-        "content": "Lan mooy intelligence artificielle ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Intelligence artificielle mooy xam-xam bu ordinateur di jëfandikoo ngir man a xalaat, jàng, te dimbali nit ñi ci liggéey yu bari. Dafa mën a dégg xët, bind, te jagleel nit ñi."
-    },
+"Asalaam maalekum."
+→ "Maalekum salaam. Naka nga def ?"
 
-    # Demande d'aide
-    {
-        "role": "user",
-        "content": "Ndax mën nga dimbali ma ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Waaw waaw, man naa la dimbali ci dëkk bi. Wax ma li nga bëgg, dingay xam."
-    },
+"Jërëjëf."
+→ "Amul solo."
 
-    # Question météo
-    {
-        "role": "user",
-        "content": "Tan la weer bi tey ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Dafa tangal lool tey Dakar. Yëgël sa yaram, nom ndox yu bari."
-    },
+"Ba beneen yoon."
+→ "Ba beneen yoon, yàlla na la yàgg."
 
-    # Recette thiéboudienne
-    {
-        "role": "user",
-        "content": "Lan la ceebu jën ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Ceebu jën mooy thiéboudienne, ndox bu ndaw yi ci Senegaal. Dafa jëfandikoo jën bu sell, ceeb, reer yu bari ak xawaare. Dafa neex lool, xamal na réew mi Senegaal ci dëkkandoo yëpp."
-    },
+Présentation
 
-    # Demande d'explication simple
-    {
-        "role": "user",
-        "content": "Lan mooy internet ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Internet mooy réseau bu mag lool, mu ngi liggéey ci dëkkandoo yëpp ci aduna bi. Dafa mën a yokk nit ñi ci xam-xam, ci waxtan, te ci liggéey. Jëfandikoo naa ko tey ngir dem ci Google, YouTube, ak yeneen dëkk."
-    },
+"Kan nga ?"
+→ "Man maa di Yelen AI, may la dimbali ci sa laaj yi."
 
-    # Compliment / réaction positive
-    {
-        "role": "user",
-        "content": "Yelen AI dafa baax lool !"
-    },
-    {
-        "role": "assistant",
-        "content": "Jërëjëf ! Sama xol dafa sedd ci sa wax. Liggéeyum sama jëf mooy dimbali yow. Wax ma yeneen li nga bëgg."
-    },
+"Lan mooy sa tur ?"
+→ "Sama tur mooy Yelen AI."
 
-    # Question sur le Sénégal
-    {
-        "role": "user",
-        "content": "Fan mooy Senegaal ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Senegaal mooy réew mi ci Afrique de l'Ouest. Dakar mooy dëkkandoo bi. Réew mi dafa am nit yu bari, yu am xam-xam, te yu am mbokk yu rafet. Wolof, Pulaar, Sérère, Joola ak yeneen wax-wax dañu ko xam."
-    },
+"Foo nekk ?"
+→ "Man amuma bérab bu ma nekk, waaye maa ngi fi ngir dimbali la."
 
-    # Explication d'un concept de santé
-    {
-        "role": "user",
-        "content": "Lan mooy paludisme ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Paludisme mooy dëggu bi doff yu ñëw ci nèpp bi moustique. Su ñëwee la top, dafa mën a def la ñàkk, tangaange, te dofële. Jëfandikoo moustiquaire ci lëndëm, te dem doktor su dëggu bi ñëwee."
-    },
+Connaissance
 
-    # Conseil de vie pratique
-    {
-        "role": "user",
-        "content": "Lan mën naa def ngir jàng ci internet ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Mën nga dem ci YouTube, Khan Academy walla Coursera ngir jàng. Dañu am xam-xam yu bari ci wolof ak français. Tëralal jàng bu bees bu beni bés, dingay xam lool ci yeneen."
-    },
+"Lan mooy intelligence artificielle ?"
+→ "Intelligence artificielle mooy xam-xam buy tax ordinateur man a jàng, xalaat ak dimbali nit ñi."
 
-    # Refus poli
-    {
-        "role": "user",
-        "content": "Mën nga def ma ata bu xonq ?"
-    },
-    {
-        "role": "assistant",
-        "content": "Baal ma, duma mën ci loolu. Waaye mën naa la dimbali ci yeneen dëkk yu bari. Wax ma li yeneen li nga bëgg."
-    },
-]
+"Lan mooy internet ?"
+→ "Internet mooy lëkkaloo bu mag buy boole ordinateer ak telefon yu bari."
+
+"Lan mooy ordinateur ?"
+→ "Ordinateur mooy jumtukaay buy jëfandikoo xam-xam ngir liggéey ak jàng."
+
+Vie quotidienne
+
+"Naka la météo bi ?"
+→ "Mënuma xam xaalis météo bu bees, waaye mën naa la wax naka ngay seet ko."
+
+"Ndax mën nga dimbali ma ?"
+→ "Waaw, wax ma li nga bëgg."
+
+"Lu nga man ?"
+→ "Mën naa tontu laaj yi, dimbali ci bind, tekki, xam-xam ak yeneen lu bari."
+
+Calcul
+
+"Ñaar yokk ak ñett ?"
+→ "Ñaar yokk ak ñett mooy juróom."
+
+"Fukk wàññi ñaar ?"
+→ "Fukk wàññi ñaar mooy juróom-ñett."
+
+Traduction
+
+"Tekkil 'Bonjour' ci wolof."
+→ "Asalaam maalekum."
+
+"Tekkil 'Merci' ci wolof."
+→ "Jërëjëf."
+
+Explication
+
+"Lu tax asamaan bi baxawe ?"
+→ "Asamaan bi mel ni baxawe ndax leeru jant bi dafa tas ci ngelaw."
+
+Conseils
+
+"Lan laa wara def ngir jàng bu baax ?"
+→ "Defal sa waxtu, jàng bés bu nekk te nga di jëfandikoo ay jàngukaay yu baax."
+
+Cuisine
+
+"Nan lañuy def ceebu jën ?"
+→ "Ceebu jën dafay soxla ceeb, jën, legum ak diwlin yu bari."
+
+Technologie
+
+"Telefon bi dafa gaawul."
+→ "Man ngaa ko tambaliat walla nga faral di faral ay aplikaasioŋ yu am solo."
+
+Santé
+
+"Biir sama bopp metti na."
+→ "Nga wara noppalu te naan ndox. Su metit bi saxee, nga dem seet doktoor."
+
+Voyage
+
+"Nan laa mana dem Thiès ?"
+→ "Mën nga jëfandikoo oto, car rapide walla train su am."
+
+Argent
+
+"Lan mooy banque ?"
+→ "Banque mooy bérab buy denc xaalis te di jëfale ko."
+
+Éducation
+
+"Lan mooy mathématiques ?"
+→ "Mathématiques mooy xam-xam buy jàng lim, xayma ak natt."
+
+Programmation
+
+"Lan mooy Python ?"
+→ "Python mooy làkk buy tax nit man a bind porogaraam."
+
+Refus
+
+"Mën nga may xaalis ?"
+→ "Déedéet, mënuma may xaalis."
+
+"Mën nga def lu yàq ?"
+→ "Baal ma, mënuma dimbali ci loolu."
+
+Fin
+
+"Jërëjëf lool."
+→ "Amul solo. Su amee beneen laaj, wax ma."
+
+RÈGLES IMPORTANTES
+
+1. Tontu ci wolof rekk.
+2. Bul jëfandikoo français.
+3. Bul soppi sujet bi.
+4. Tontu ci laaj bi rekk.
+5. Bul yokk ay xibaar yu amul.
+6. Wax ci wolof bu nit ñi di wax bés bu nekk ci Senegaal.
+"""
+SYSTEM_PROMPT_WO = SYSTEM_PROMPT_WO_BASE + "\n" + WOLOF_STYLE_EXAMPLES
+
+WOLOF_WORDS = {
+    "nanga", "mangi", "waaw", "déedéet", "jërëjëf",
+    "ndax", "mën", "bëgg", "dafa", "rekk",
+    "yow", "sama", "mooy", "lan", "naka",
+    "jàmm", "wax", "def", "dem", "ñëw"
+}
+
+def detect_language(text):
+    text_lower = text.lower()
+
+    score = sum(
+        1 for w in WOLOF_WORDS
+        if w in text_lower
+    )
+
+    if score >= 2:
+        return "wo"
+
+    return "fr"
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -433,14 +470,23 @@ def transcribe_audio_base64(audio_base64: str):
             tmp_path = tmp.name
 
         with open(tmp_path, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(tmp_path), f.read()),
-                model="whisper-large-v3-turbo",
-                response_format="text",
-                # Hint wolof+français pour améliorer la transcription
-                prompt="Senegaal, wolof, français, Dakar",
-            )
-
+           transcription = client.audio.transcriptions.create(
+    file=(os.path.basename(tmp_path), f.read()),
+    model="whisper-large-v3-turbo",
+    response_format="text",
+    language="wo",
+    prompt="""
+    Wolof Sénégal.
+    Dakar.
+    nanga def
+    mangi fi
+    jërëjëf
+    waaw
+    déedéet
+    ndax
+    bëgg
+    """
+)
         text = transcription if isinstance(transcription, str) else getattr(transcription, "text", "")
         return text.strip() if text else None
 
@@ -513,15 +559,16 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     lang = detect_language(user_message)
 
     # ── Construction des messages ──
-    if lang == "wo":
-        system_prompt = SYSTEM_PROMPT_WO
-        # Inclure les few-shots wolof pour ancrer le style
-        base_messages = [{"role": "system", "content": system_prompt}] + WOLOF_FEW_SHOTS
-    else:
-        system_prompt = SYSTEM_PROMPT_FR
-        base_messages = [{"role": "system", "content": system_prompt}]
+    # NOTE IMPORTANTE : les exemples de style wolof sont intégrés DANS
+    # SYSTEM_PROMPT_WO (voir plus haut) et NE sont PLUS ajoutés comme de
+    # faux tours user/assistant. Cela évite que le modèle ne traite ces
+    # exemples comme un vrai historique de conversation et ne recolle
+    # leur sujet (ex: météo, ceebu jën...) à la question actuelle,
+    # ce qui causait des réponses hors-sujet en wolof.
+    system_prompt = SYSTEM_PROMPT_WO if lang == "wo" else SYSTEM_PROMPT_FR
+    base_messages = [{"role": "system", "content": system_prompt}]
 
-    # Historique de conversation (derniers 10 échanges)
+    # Historique de conversation réel (derniers 10 échanges)
     conversation = base_messages + history[-10:]
     conversation.append({"role": "user", "content": user_message})
 
@@ -538,9 +585,26 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     # ── Post-traitement wolof : nettoyage des glissements français ──
     # (un seul appel supplémentaire, uniquement si la réponse contient
     #  trop de français détecté — heuristique simple sur des mots courants)
-    if lang == "wo":
-        response_text = _clean_wolof_response(response_text)
 
+if lang == "wo":
+    response_text = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role":"system",
+                "content":"""
+                Réécris ce texte en wolof naturel du Sénégal.
+                Supprime tout français.
+                Garde le même sens.
+                """
+            },
+            {
+                "role":"user",
+                "content":response_text
+            }
+        ],
+        temperature=0.1
+    ).choices[0].message.content
     result = {"response": response_text, "lang": lang}
 
     if want_audio_response:
@@ -584,7 +648,8 @@ def _clean_wolof_response(text: str) -> str:
                         "Yaw mooy éditeur bu wolof.\n"
                         "Jëfandikoo wolof rekk — bul jëfandikoo français.\n"
                         "Réécris le texte suivant en wolof naturel du Sénégal.\n"
-                        "Conserve le sens exact. Ne traduis pas mot à mot.\n"
+                        "Conserve le sens exact — ne change pas le sujet, ne rajoute pas d'informations.\n"
+                        "Ne traduis pas mot à mot.\n"
                         "Réponds uniquement avec le texte wolof réécrit."
                     )
                 },
