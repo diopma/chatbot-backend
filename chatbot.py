@@ -474,17 +474,10 @@ def transcribe_audio_base64(audio_base64: str):
     file=(os.path.basename(tmp_path), f.read()),
     model="whisper-large-v3-turbo",
     response_format="text",
-    language="wo",
     prompt="""
-    Wolof Sénégal.
-    Dakar.
-    nanga def
-    mangi fi
-    jërëjëf
-    waaw
-    déedéet
-    ndax
-    bëgg
+    Sénégal.
+    Les langues parlées sont le wolof et le français.
+    Les utilisateurs peuvent mélanger les deux.
     """
 )
         text = transcription if isinstance(transcription, str) else getattr(transcription, "text", "")
