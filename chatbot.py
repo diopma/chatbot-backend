@@ -28,16 +28,48 @@ client = Groq(api_key=GROQ_API_KEY)
 # ─────────────────────────────────────────────
 # IMAGE CONFIG
 # ─────────────────────────────────────────────
+# NOTE : ces prompts de style étaient auparavant des stubs tronqués
+# (ex: "minimalist professional flat vector logo...") — le "..." était
+# envoyé TEL QUEL à l'API d'image, ce qui polluait la requête et ne
+# donnait quasiment aucune indication de style utile. Ils sont maintenant
+# écrits en entier.
 TYPE_PROMPTS = {
-    "logo": "minimalist professional flat vector logo...",
-    "icon": "simple modern app icon...",
-    "illustration": "vibrant detailed african art illustration...",
-    "photo": "photorealistic DSLR photo...",
-    "pattern": "seamless african kente textile pattern...",
-    "banner": "modern marketing banner...",
-    "avatar": "professional portrait photo...",
-    "poster": "eye-catching poster design...",
-    "general": "high quality digital art..."
+    "logo": (
+        "minimalist professional flat vector logo design, clean lines, "
+        "balanced composition, simple and memorable, suitable for branding, "
+        "centered on plain background, no mockup, no watermark"
+    ),
+    "icon": (
+        "simple modern flat app icon, bold shapes, single clear symbol, "
+        "clean vector style, centered, no text, no watermark"
+    ),
+    "illustration": (
+        "vibrant detailed illustration with african art influences, "
+        "rich colors, expressive, high quality digital art, no watermark"
+    ),
+    "photo": (
+        "photorealistic DSLR photo, natural lighting, sharp focus, "
+        "high detail, realistic textures, no watermark"
+    ),
+    "pattern": (
+        "seamless repeating pattern inspired by african kente textile, "
+        "vibrant colors, symmetrical, tileable, high detail, no watermark"
+    ),
+    "banner": (
+        "modern marketing banner design, bold typography space, balanced "
+        "layout, professional color palette, wide format, no watermark"
+    ),
+    "avatar": (
+        "professional portrait style avatar, centered face, clean "
+        "background, friendly and approachable, high quality, no watermark"
+    ),
+    "poster": (
+        "eye-catching poster design, strong visual hierarchy, bold colors, "
+        "professional composition, high quality, no watermark"
+    ),
+    "general": (
+        "high quality digital art, detailed, professional, no watermark"
+    ),
 }
 
 TYPE_SIZES = {
@@ -55,16 +87,58 @@ TYPE_SIZES = {
 # ─────────────────────────────────────────────
 # IMAGE INTENT DETECTION
 # ─────────────────────────────────────────────
+# Ordre volontaire du plus spécifique au plus générique : un mot-clé
+# spécifique (ex: "logo") doit gagner sur un mot-clé générique (ex: "image")
+# même si les deux apparaissent dans le message.
+_IMAGE_TYPE_KEYWORDS = [
+    ("logo",         ["logo"]),
+    ("icon",         ["icône", "icon", "icone"]),
+    ("avatar",       ["avatar", "photo de profil", "pp "]),
+    ("banner",       ["bannière", "banniere", "banner", "cover"]),
+    ("poster",       ["poster", "affiche"]),
+    ("pattern",      ["motif", "pattern", "kente"]),
+    ("photo",        ["photo réaliste", "photo realiste", "photographie"]),
+    ("illustration", ["illustration", "dessin africain", "art africain"]),
+]
+
+_IMAGE_TRIGGER_WORDS = [
+    "logo", "image", "dessine", "crée", "créer", "génère", "genere",
+    "avatar", "poster", "icône", "icon", "bannière", "banner", "affiche",
+    "illustration", "motif", "photo",
+    "tëral sûret", "bind sûret", "def sûret",
+]
+
+
+def _detect_image_type(msg_lower: str) -> str:
+    """Détecte le type d'image demandé (logo, avatar, poster, etc.) à
+    partir de mots-clés, plutôt que de renvoyer toujours 'general' — sinon
+    le prompt de style et les dimensions spécifiques ne sont jamais
+    utilisés, même quand l'utilisateur demande explicitement un logo."""
+    for gen_type, keywords in _IMAGE_TYPE_KEYWORDS:
+        if any(k in msg_lower for k in keywords):
+            return gen_type
+    return "general"
+
+
 def detect_image_intent(msg: str):
     msg_lower = msg.lower()
-    triggers = ["logo", "image", "dessine", "crée", "avatar", "poster",
-                "tëral sûret", "bind sûret", "def sûret"]
-    if not any(t in msg_lower for t in triggers):
+    if not any(t in msg_lower for t in _IMAGE_TRIGGER_WORDS):
         return None
+
+    gen_type = _detect_image_type(msg_lower)
+    type_labels = {
+        "logo": ("Logo", "généré"), "icon": ("Icône", "générée"),
+        "avatar": ("Avatar", "généré"), "banner": ("Bannière", "générée"),
+        "poster": ("Poster", "généré"), "pattern": ("Motif", "généré"),
+        "photo": ("Photo", "générée"), "illustration": ("Illustration", "générée"),
+        "general": ("Image", "générée"),
+    }
+    label, participle = type_labels.get(gen_type, ("Image", "générée"))
+
     return {
-        "type": "general",
+        "type": gen_type,
         "visual_prompt": msg,
-        "confirmation_message": "🎨 Image générée !"
+        "confirmation_message": f"🎨 {label} {participle} !",
     }
 
 # ─────────────────────────────────────────────
@@ -212,9 +286,26 @@ SYSTEM_PROMPT_WO = build_wolof_system_prompt("")
 # IMAGE GENERATION
 # ─────────────────────────────────────────────
 def generate_image(prompt: str, gen_type: str):
-    full_prompt = TYPE_PROMPTS.get(gen_type, "") + prompt
+    # AVANT : le prompt de style générique était collé directement devant
+    # la description de l'utilisateur, sans séparateur, et les dimensions
+    # étaient toujours 1024x1024 quel que soit le type (TYPE_SIZES n'était
+    # jamais utilisé). Résultat : un logo pouvait sortir au mauvais format
+    # et le prompt final était confus pour l'API d'image.
+    #
+    # Maintenant : la description de l'utilisateur (couleurs, texte, style
+    # demandés) passe EN PREMIER — c'est elle qui prime — suivie du style
+    # de fond correspondant au type détecté, et les dimensions adaptées
+    # au type sont utilisées.
+    style_suffix = TYPE_PROMPTS.get(gen_type, TYPE_PROMPTS["general"])
+    full_prompt = f"{prompt}, {style_suffix}"
+
+    width, height = TYPE_SIZES.get(gen_type, TYPE_SIZES["general"])
+
     encoded = urllib.parse.quote(full_prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024"
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width={width}&height={height}&nologo=true"
+    )
     try:
         res = requests.get(url, timeout=60)
         return base64.b64encode(res.content).decode()
