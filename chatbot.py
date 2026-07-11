@@ -103,30 +103,95 @@ XEEYU BI (style bu naturel) :
 """
 
 # ─────────────────────────────────────────────
-# EXEMPLES DE STYLE WOLOF (intégrés au system prompt, PAS à l'historique)
+# EXEMPLES DE STYLE WOLOF — SÉLECTION DYNAMIQUE PAR DOMAINE
 # ─────────────────────────────────────────────
-# IMPORTANT — pourquoi la liste est volontairement COURTE (5-6 exemples) :
-# Une trop grande liste d'exemples couvrant beaucoup de sujets différents
-# (santé, météo, argent, cuisine, voyage, programmation...) augmente le
-# risque que le modèle "pioche" la réponse d'un exemple proche au lieu de
-# traiter la vraie question de l'utilisateur — c'est exactement ce qui
-# causait les réponses hors-sujet. Une liste courte, centrée UNIQUEMENT
-# sur le TON (salutations / remerciements / refus poli), réduit ce risque
-# tout en gardant le style naturel.
-#
-# Ces exemples ne sont PAS envoyés comme de vrais tours user/assistant :
-# ils vivent uniquement dans le system prompt, présentés explicitement
-# comme des modèles de ton à ignorer sur le fond.
-WOLOF_STYLE_EXAMPLES = """
+# Pourquoi dynamique plutôt qu'une liste statique unique :
+# - Une liste statique unique doit rester COURTE (sinon risque de collision
+#   de sujet, voir le bug corrigé précédemment) mais du coup elle ne peut
+#   pas bien illustrer le ton pour tous les types de questions.
+# - En choisissant 2-3 exemples DU MÊME DOMAINE que la question posée
+#   (salutation, remerciement, question factuelle, demande d'aide, refus),
+#   le modèle reçoit un modèle de phrasé pertinent pour CE cas précis,
+#   sans jamais voir d'exemples d'autres sujets qui pourraient le distraire.
+# - Ces exemples ne sont JAMAIS envoyés comme faux tours user/assistant :
+#   ils restent uniquement dans le system prompt, présentés explicitement
+#   comme des modèles de ton à ignorer sur le fond.
+
+WOLOF_DOMAIN_EXAMPLES = {
+    "salutation": [
+        ('"Nanga def ?"', '"Mangi fi rekk. Yow nag, naka nga def ?"'),
+        ('"Asalaam maalekum."', '"Maalekum salaam. Naka nga def ?"'),
+        ('"Ba beneen yoon."', '"Ba beneen yoon, yàlla na la yàgg."'),
+    ],
+    "remerciement": [
+        ('"Jërëjëf lool !"', '"Amul solo."'),
+        ('"Yelen AI dafa baax lool !"', '"Jërëjëf, sama xol dafa sedd ci sa wax."'),
+    ],
+    "demande_aide": [
+        ('"Ndax mën nga dimbali ma ?"', '"Waaw, wax ma li nga bëgg."'),
+        ('"Lu nga man ?"', '"Mën naa tontu laaj yi, dimbali ci bind ak yeneen mbir."'),
+    ],
+    "refus": [
+        ('"Mën nga def ma ata bu xonq ?"', '"Baal ma, duma mën ci loolu."'),
+        ('"Mën nga may xaalis ?"', '"Déedéet, mënuma may xaalis."'),
+    ],
+    "question_factuelle": [
+        ('"Lan mooy internet ?"', '"Internet mooy lëkkalekaay bu mag buy boole nit ñi ci aduna bi."'),
+        ('"Ñaar yokk ak ñett ?"', '"Ñaar yokk ak ñett mooy juróom."'),
+    ],
+    "generic": [
+        ('"Nanga def ?"', '"Mangi fi rekk. Yow nag, naka nga def ?"'),
+        ('"Jërëjëf lool !"', '"Amul solo."'),
+    ],
+}
+
+# Mots-clés heuristiques pour deviner le domaine sans appel LLM supplémentaire
+# (rapide, pas de coût ni de latence en plus).
+_DOMAIN_KEYWORDS = {
+    "salutation": ["nanga def", "asalaam", "salaam", "naka nga def", "ba beneen", "bonjour", "salut"],
+    "remerciement": ["jërëjëf", "jerejef", "merci", "dieuredieuf"],
+    "demande_aide": ["dimbali", "mën nga", "aide", "aidez", "wax ma"],
+    "refus": ["mën nga def ma", "mën nga may", "peux-tu me donner", "donne moi"],
+    "question_factuelle": ["lan mooy", "c'est quoi", "qu'est-ce que", "combien", "yokk", "wàññi"],
+}
+
+# Glossaire de connecteurs naturels neutres (aucun sujet attaché).
+# Sert à donner un phrasé plus oral/vivant sans donner de contenu à copier.
+WOLOF_CONNECTORS = """
+CONNECTEURS NATURELS (jëfandikoo yu neex ngir wax bu araam, bul jël leen ni
+réponse — yeen dañuy jur rekk phrasé bi) :
+- Ouvertures : "Dégg naa...", "Lu jëkk...", "Ci lu jëkk..."
+- Enchaînements : "Ci kaw loolu...", "Boobu la...", "Ci gëstu bi..."
+- Nuances : "waaye...", "kon...", "léegi...", "moo tax..."
+- Confirmation/accord : "waaw dëgg la...", "moom lañu wax..."
+"""
+
+
+def _detect_wolof_domain(user_message: str) -> str:
+    """Devine le domaine (salutation, remerciement, etc.) via mots-clés
+    simples — pas d'appel LLM supplémentaire, donc pas de latence en plus."""
+    msg = user_message.lower()
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        if any(k in msg for k in keywords):
+            return domain
+    return "generic"
+
+
+def build_wolof_system_prompt(user_message: str) -> str:
+    """Construit le system prompt wolof avec 2-3 exemples du domaine
+    détecté seulement — jamais tous les domaines à la fois, pour éviter
+    tout risque de collision de sujet."""
+    domain = _detect_wolof_domain(user_message)
+    examples = WOLOF_DOMAIN_EXAMPLES.get(domain, WOLOF_DOMAIN_EXAMPLES["generic"])
+
+    examples_block = "\n".join(f"- {q} → {a}" for q, a in examples)
+
+    style_block = f"""
 EXEMPLES DE STYLE WOLOF (à titre d'illustration UNIQUEMENT — ce ne sont PAS
 des messages échangés avec l'utilisateur actuel. Ignore totalement leur
 sujet, retiens seulement le ton et la longueur des réponses) :
 
-- "Nanga def ?" → "Mangi fi rekk. Yow nag, naka nga def ?"
-- "Jërëjëf lool !" → "Amul solo."
-- "Ndax mën nga dimbali ma ?" → "Waaw, wax ma li nga bëgg."
-- "Mën nga def ma ata bu xonq ?" → "Baal ma, duma mën ci loolu."
-- "Ba beneen yoon." → "Ba beneen yoon, yàlla na la yàgg."
+{examples_block}
 
 RÈGLES ABSOLUES DE PERTINENCE ET DE NATUREL :
 1. Réponds UNIQUEMENT à la question ou au message que l'utilisateur envoie MAINTENANT — jamais à un autre sujet, même si un exemple ci-dessus semble proche.
@@ -136,7 +201,12 @@ RÈGLES ABSOLUES DE PERTINENCE ET DE NATUREL :
 5. Une question courte et simple mérite une réponse courte et simple — pas un exposé.
 """
 
-SYSTEM_PROMPT_WO = SYSTEM_PROMPT_WO_BASE + "\n" + WOLOF_STYLE_EXAMPLES
+    return SYSTEM_PROMPT_WO_BASE + "\n" + WOLOF_CONNECTORS + "\n" + style_block
+
+
+# Conservé pour compatibilité (utilisé par analyze_document, qui ne connaît
+# pas le domaine précis à l'avance) : version générique statique.
+SYSTEM_PROMPT_WO = build_wolof_system_prompt("")
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -427,9 +497,18 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     lang = detect_language(user_message)
 
     # ── Construction des messages ──
-    # Les exemples de style wolof vivent UNIQUEMENT dans SYSTEM_PROMPT_WO,
-    # jamais comme faux tours user/assistant (voir note plus haut).
-    system_prompt = SYSTEM_PROMPT_WO if lang == "wo" else SYSTEM_PROMPT_FR
+    # Pour le wolof : prompt construit dynamiquement avec seulement les
+    # exemples du domaine détecté (salutation, remerciement, etc.), pour
+    # un phrasé plus naturel et pertinent sans risque de collision de
+    # sujet. Les exemples ne sont JAMAIS envoyés comme faux tours
+    # user/assistant — uniquement à l'intérieur du system prompt.
+    if lang == "wo":
+        system_prompt = build_wolof_system_prompt(user_message)
+        temperature = 0.65  # un peu plus élevé pour un phrasé moins mécanique
+    else:
+        system_prompt = SYSTEM_PROMPT_FR
+        temperature = 0.5
+
     base_messages = [{"role": "system", "content": system_prompt}]
 
     # Historique de conversation réel (derniers 10 échanges)
@@ -440,7 +519,7 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=conversation,
-        temperature=0.5,
+        temperature=temperature,
         max_tokens=600,
     )
 
@@ -469,7 +548,9 @@ def _clean_wolof_response(text: str, original_question: str = "") -> str:
     Vérifie si la réponse contient trop de français.
     Si oui, relance UN SEUL appel de nettoyage ciblé, en lui donnant aussi
     la question d'origine pour qu'il ne dérive jamais vers un autre sujet
-    pendant la réécriture (il ne fait que corriger la langue, pas le fond).
+    pendant la réécriture. Cet appel corrige la langue ET améliore le
+    naturel/rythme oral (pas juste une traduction mot à mot du français
+    résiduel), sans jamais changer le sens ou le sujet.
     """
     french_markers = [
         "je suis", "je vais", "c'est", "il y a", "pour vous",
@@ -486,19 +567,26 @@ def _clean_wolof_response(text: str, original_question: str = "") -> str:
     try:
         correction = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            temperature=0.2,
+            temperature=0.4,
             max_tokens=600,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Yaw mooy éditeur bu wolof.\n"
+                        "Yaw mooy éditeur bu wolof bu Dakar, bu xam wolof bu "
+                        "dëgg dëgg wu nit ñi di wax bés bu nekk (pas le wolof "
+                        "littéraire/scolaire).\n"
                         "Jëfandikoo wolof rekk — bul jëfandikoo français.\n"
-                        "Réécris le texte suivant en wolof naturel du Sénégal.\n"
+                        "Réécris le texte suivant en wolof naturel, oral, "
+                        "comme le parlerait quelqu'un à Dakar dans une "
+                        "conversation courante — pas une traduction mot à "
+                        "mot, pas un style scolaire ou trop formel.\n"
+                        "Utilise des connecteurs oraux naturels si besoin "
+                        "(waaye, kon, léegi, moo tax...).\n"
                         "Conserve EXACTEMENT le même sens et le même sujet — "
                         "ne rajoute aucune information, ne réponds pas à autre "
-                        "chose que ce que le texte dit déjà.\n"
-                        "Ne traduis pas mot à mot.\n"
+                        "chose que ce que le texte dit déjà, ne rallonge pas "
+                        "inutilement.\n"
                         "Réponds uniquement avec le texte wolof réécrit, rien d'autre."
                     )
                 },
@@ -507,7 +595,7 @@ def _clean_wolof_response(text: str, original_question: str = "") -> str:
                     "content": (
                         f"Question d'origine de l'utilisateur (pour contexte, "
                         f"ne pas y répondre à nouveau) : {original_question}\n\n"
-                        f"Texte à réécrire en wolof naturel :\n{text}"
+                        f"Texte à réécrire en wolof naturel et oral :\n{text}"
                     )
                 }
             ]
