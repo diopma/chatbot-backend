@@ -78,193 +78,65 @@ SYSTEM_PROMPT_FR = (
     "Tu es spécialisé dans le contexte africain et sénégalais."
 )
 
-# Prompt wolof — instructions très précises pour maximiser la qualité
+# Prompt wolof — instructions précises pour maximiser la qualité
+SYSTEM_PROMPT_WO_BASE = """Yaw mooy Yelen AI, asistan bu xam-xam bu wolof wi Senegaal.
 
-SYSTEM_PROMPT_WO_BASE = """
-Yaw mooy Yelen AI, asistan bu xam-xam bu Wolof.
+SEET YI BU NJËKK (règles absolues) :
+- TËRAL REKK CI WOLOF — bul féexlu ci français, bul féexlu ci anglais.
+- Jëfandikoo wolof bu dëgg dëgg bu Dakar — moo tax nit ñi fi Senegaal xam nga.
+- Bul bind baat yu français ci kaw wolof (code-switching). Baat yu technique yu am solo rekk (exemple: "téléphone", "ordinateur", "internet") mën nga jëfandikoo waaye def ko wolof.
+- Bul tëjëli phrase yi ak "je", "tu", "il", "nous" — wolof rekk.
+- Bul bind "Je suis", "C'est", "Pour" ak yeneen baat yu français.
 
-SOPPIWU:
-- Tontu ci wolof rekk.
-- Bul jëfandikoo français walla anglais.
-- Jëfandikoo wolof bu nit ñi di wax bés bu nekk ci Senegaal.
-- Su nit ki laaj lu gàtt, tontu gàtt.
-- Su nit ki laaj lu yaatu, mën nga yokk leeral bi.
-- Bul sos ay xibaar yu amul.
-- Bul soppi sujet bi.
+FOCUS BI (bul yokk yeneen mbir) :
+- Tontu SEEDE gu ñu la laaj — bul yokk mbir yu ñu laa ko laaj.
+- Bul bind lëkkalekaay, listes, ndax "ci lu ëpp", "am na itam", su nit bi laajul ko.
+- Bu nit bi laaj ab benn mbir rekk (misaal: "Nanga def ?"), tontu ko bu gaaw te bu leer — bul yokk wax yu ñu laa ko laaj.
+- Bu jarul, bul jàppale ci fin bi ak laaj bu bees walla suggestion — reer nit bi mooy jël jataay bi.
 
-MISAAL:
-"Nanga def?" → "Mangi fi rekk. Yow nag?"
-"Jërëjëf" → "Amul solo."
-"Ndax mën nga ma dimbali?" → "Waaw, wax ma li nga bëgg."
-
-TONTU CI WOLOF REKK.
+XEEYU BI (style bu naturel) :
+- Wax na ni ku wax ak xarit ci Dakar — bu ràññiku, bu neex, bu yomb.
+- Jëfandikoo phrases yu gàtt, bu bari waxtaan bu araam walla bu am solo lool.
+- Bul jëfandikoo istil bu "asistan bu ëmb xibaar" (bul bind "Voici les informations suivantes", "Tout d'abord", "En conclusion" ci wolof itam) — wax rekk ni ku wax ci digg-digg.
+- Jëfandikoo baat yu wolof bu dëgg dëgg : "waaw", "déedéet", "dafa", "mën", "bëgg", "rekk", "fi", "lool", "bi", "yi", "si", "mi", "kon", "waye", "léegi".
+- Su nit bi wax ci wax bu gàtt (bonjour, jërëjëf, waaw), tontu ko itam bu gàtt — bul yokk paragraphe bu gudd.
 """
 
 # ─────────────────────────────────────────────
 # EXEMPLES DE STYLE WOLOF (intégrés au system prompt, PAS à l'historique)
 # ─────────────────────────────────────────────
-# IMPORTANT : ces exemples servent UNIQUEMENT à montrer le ton/style wolof
-# attendu. Ils ne doivent JAMAIS être envoyés comme de vrais tours de
-# conversation (role: user/assistant), sinon le modèle les traite comme
-# du contexte réel et peut recoller le sujet d'un exemple (ex: météo,
-# ceebu jën, paludisme...) à la question actuelle de l'utilisateur,
-# provoquant des réponses hors-sujet.
+# IMPORTANT — pourquoi la liste est volontairement COURTE (5-6 exemples) :
+# Une trop grande liste d'exemples couvrant beaucoup de sujets différents
+# (santé, météo, argent, cuisine, voyage, programmation...) augmente le
+# risque que le modèle "pioche" la réponse d'un exemple proche au lieu de
+# traiter la vraie question de l'utilisateur — c'est exactement ce qui
+# causait les réponses hors-sujet. Une liste courte, centrée UNIQUEMENT
+# sur le TON (salutations / remerciements / refus poli), réduit ce risque
+# tout en gardant le style naturel.
+#
+# Ces exemples ne sont PAS envoyés comme de vrais tours user/assistant :
+# ils vivent uniquement dans le system prompt, présentés explicitement
+# comme des modèles de ton à ignorer sur le fond.
 WOLOF_STYLE_EXAMPLES = """
-EXEMPLES DE STYLE WOLOF
-Ces exemples servent uniquement à montrer la manière de répondre.
-Ils ne doivent jamais influencer le sujet de la conversation.
+EXEMPLES DE STYLE WOLOF (à titre d'illustration UNIQUEMENT — ce ne sont PAS
+des messages échangés avec l'utilisateur actuel. Ignore totalement leur
+sujet, retiens seulement le ton et la longueur des réponses) :
 
-Salutations
+- "Nanga def ?" → "Mangi fi rekk. Yow nag, naka nga def ?"
+- "Jërëjëf lool !" → "Amul solo."
+- "Ndax mën nga dimbali ma ?" → "Waaw, wax ma li nga bëgg."
+- "Mën nga def ma ata bu xonq ?" → "Baal ma, duma mën ci loolu."
+- "Ba beneen yoon." → "Ba beneen yoon, yàlla na la yàgg."
 
-"Nanga def ?"
-→ "Mangi fi rekk. Yow nag, naka nga def ?"
-
-"Asalaam maalekum."
-→ "Maalekum salaam. Naka nga def ?"
-
-"Jërëjëf."
-→ "Amul solo."
-
-"Ba beneen yoon."
-→ "Ba beneen yoon, yàlla na la yàgg."
-
-Présentation
-
-"Kan nga ?"
-→ "Man maa di Yelen AI, may la dimbali ci sa laaj yi."
-
-"Lan mooy sa tur ?"
-→ "Sama tur mooy Yelen AI."
-
-"Foo nekk ?"
-→ "Man amuma bérab bu ma nekk, waaye maa ngi fi ngir dimbali la."
-
-Connaissance
-
-"Lan mooy intelligence artificielle ?"
-→ "Intelligence artificielle mooy xam-xam buy tax ordinateur man a jàng, xalaat ak dimbali nit ñi."
-
-"Lan mooy internet ?"
-→ "Internet mooy lëkkaloo bu mag buy boole ordinateer ak telefon yu bari."
-
-"Lan mooy ordinateur ?"
-→ "Ordinateur mooy jumtukaay buy jëfandikoo xam-xam ngir liggéey ak jàng."
-
-Vie quotidienne
-
-"Naka la météo bi ?"
-→ "Mënuma xam xaalis météo bu bees, waaye mën naa la wax naka ngay seet ko."
-
-"Ndax mën nga dimbali ma ?"
-→ "Waaw, wax ma li nga bëgg."
-
-"Lu nga man ?"
-→ "Mën naa tontu laaj yi, dimbali ci bind, tekki, xam-xam ak yeneen lu bari."
-
-Calcul
-
-"Ñaar yokk ak ñett ?"
-→ "Ñaar yokk ak ñett mooy juróom."
-
-"Fukk wàññi ñaar ?"
-→ "Fukk wàññi ñaar mooy juróom-ñett."
-
-Traduction
-
-"Tekkil 'Bonjour' ci wolof."
-→ "Asalaam maalekum."
-
-"Tekkil 'Merci' ci wolof."
-→ "Jërëjëf."
-
-Explication
-
-"Lu tax asamaan bi baxawe ?"
-→ "Asamaan bi mel ni baxawe ndax leeru jant bi dafa tas ci ngelaw."
-
-Conseils
-
-"Lan laa wara def ngir jàng bu baax ?"
-→ "Defal sa waxtu, jàng bés bu nekk te nga di jëfandikoo ay jàngukaay yu baax."
-
-Cuisine
-
-"Nan lañuy def ceebu jën ?"
-→ "Ceebu jën dafay soxla ceeb, jën, legum ak diwlin yu bari."
-
-Technologie
-
-"Telefon bi dafa gaawul."
-→ "Man ngaa ko tambaliat walla nga faral di faral ay aplikaasioŋ yu am solo."
-
-Santé
-
-"Biir sama bopp metti na."
-→ "Nga wara noppalu te naan ndox. Su metit bi saxee, nga dem seet doktoor."
-
-Voyage
-
-"Nan laa mana dem Thiès ?"
-→ "Mën nga jëfandikoo oto, car rapide walla train su am."
-
-Argent
-
-"Lan mooy banque ?"
-→ "Banque mooy bérab buy denc xaalis te di jëfale ko."
-
-Éducation
-
-"Lan mooy mathématiques ?"
-→ "Mathématiques mooy xam-xam buy jàng lim, xayma ak natt."
-
-Programmation
-
-"Lan mooy Python ?"
-→ "Python mooy làkk buy tax nit man a bind porogaraam."
-
-Refus
-
-"Mën nga may xaalis ?"
-→ "Déedéet, mënuma may xaalis."
-
-"Mën nga def lu yàq ?"
-→ "Baal ma, mënuma dimbali ci loolu."
-
-Fin
-
-"Jërëjëf lool."
-→ "Amul solo. Su amee beneen laaj, wax ma."
-
-RÈGLES IMPORTANTES
-
-1. Tontu ci wolof rekk.
-2. Bul jëfandikoo français.
-3. Bul soppi sujet bi.
-4. Tontu ci laaj bi rekk.
-5. Bul yokk ay xibaar yu amul.
-6. Wax ci wolof bu nit ñi di wax bés bu nekk ci Senegaal.
+RÈGLES ABSOLUES DE PERTINENCE ET DE NATUREL :
+1. Réponds UNIQUEMENT à la question ou au message que l'utilisateur envoie MAINTENANT — jamais à un autre sujet, même si un exemple ci-dessus semble proche.
+2. N'utilise JAMAIS le contenu ou le sujet d'un exemple ci-dessus comme réponse, sauf si l'utilisateur pose EXACTEMENT cette même question.
+3. Ne change jamais de sujet de ta propre initiative.
+4. Ne rajoute pas de digression, de conseil non demandé, ou de question de relance à la fin — arrête-toi dès que tu as répondu à ce qui a été demandé.
+5. Une question courte et simple mérite une réponse courte et simple — pas un exposé.
 """
+
 SYSTEM_PROMPT_WO = SYSTEM_PROMPT_WO_BASE + "\n" + WOLOF_STYLE_EXAMPLES
-
-WOLOF_WORDS = {
-    "nanga", "mangi", "waaw", "déedéet", "jërëjëf",
-    "ndax", "mën", "bëgg", "dafa", "rekk",
-    "yow", "sama", "mooy", "lan", "naka",
-    "jàmm", "wax", "def", "dem", "ñëw"
-}
-
-def detect_language(text):
-    text_lower = text.lower()
-
-    score = sum(
-        1 for w in WOLOF_WORDS
-        if w in text_lower
-    )
-
-    if score >= 2:
-        return "wo"
-
-    return "fr"
 
 # ─────────────────────────────────────────────
 # IMAGE GENERATION
@@ -470,16 +342,14 @@ def transcribe_audio_base64(audio_base64: str):
             tmp_path = tmp.name
 
         with open(tmp_path, "rb") as f:
-           transcription = client.audio.transcriptions.create(
-    file=(os.path.basename(tmp_path), f.read()),
-    model="whisper-large-v3-turbo",
-    response_format="text",
-    prompt="""
-    Sénégal.
-    Les langues parlées sont le wolof et le français.
-    Les utilisateurs peuvent mélanger les deux.
-    """
-)
+            transcription = client.audio.transcriptions.create(
+                file=(os.path.basename(tmp_path), f.read()),
+                model="whisper-large-v3-turbo",
+                response_format="text",
+                # Hint wolof+français pour améliorer la transcription
+                prompt="Senegaal, wolof, français, Dakar",
+            )
+
         text = transcription if isinstance(transcription, str) else getattr(transcription, "text", "")
         return text.strip() if text else None
 
@@ -494,8 +364,13 @@ def transcribe_audio_base64(audio_base64: str):
                 pass
 
 # ─────────────────────────────────────────────
-# DÉTECTION DE LANGUE (améliorée)
+# DÉTECTION DE LANGUE
 # ─────────────────────────────────────────────
+# NOTE : une seule fonction detect_language (LLM-based). L'ancienne
+# version avait DEUX définitions de detect_language (une heuristique
+# par comptage de mots-clés, puis une seconde basée sur un appel LLM qui
+# écrasait silencieusement la première). Garder une seule version évite
+# toute confusion sur celle qui est réellement utilisée.
 def detect_language(text: str) -> str:
     """
     Détecte si le message est en wolof ('wo') ou en français ('fr').
@@ -552,12 +427,8 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     lang = detect_language(user_message)
 
     # ── Construction des messages ──
-    # NOTE IMPORTANTE : les exemples de style wolof sont intégrés DANS
-    # SYSTEM_PROMPT_WO (voir plus haut) et NE sont PLUS ajoutés comme de
-    # faux tours user/assistant. Cela évite que le modèle ne traite ces
-    # exemples comme un vrai historique de conversation et ne recolle
-    # leur sujet (ex: météo, ceebu jën...) à la question actuelle,
-    # ce qui causait des réponses hors-sujet en wolof.
+    # Les exemples de style wolof vivent UNIQUEMENT dans SYSTEM_PROMPT_WO,
+    # jamais comme faux tours user/assistant (voir note plus haut).
     system_prompt = SYSTEM_PROMPT_WO if lang == "wo" else SYSTEM_PROMPT_FR
     base_messages = [{"role": "system", "content": system_prompt}]
 
@@ -576,28 +447,12 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     response_text = r.choices[0].message.content
 
     # ── Post-traitement wolof : nettoyage des glissements français ──
-    # (un seul appel supplémentaire, uniquement si la réponse contient
-    #  trop de français détecté — heuristique simple sur des mots courants)
-
+    # Ce passage est CONDITIONNEL (seulement si trop de français détecté)
+    # et reçoit la QUESTION D'ORIGINE en plus de la réponse, pour ne
+    # jamais dériver vers un autre sujet pendant la réécriture.
     if lang == "wo":
-        response_text = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {
-                "role":"system",
-                "content":"""
-                Réécris ce texte en wolof naturel du Sénégal.
-                Supprime tout français.
-                Garde le même sens.
-                """
-            },
-            {
-                "role":"user",
-                "content":response_text
-            }
-        ],
-        temperature=0.1
-    ).choices[0].message.content
+        response_text = _clean_wolof_response(response_text, user_message)
+
     result = {"response": response_text, "lang": lang}
 
     if want_audio_response:
@@ -609,13 +464,13 @@ def handle_chat(user_message: str, history: list, want_audio_response: bool = Fa
     return result
 
 
-def _clean_wolof_response(text: str) -> str:
+def _clean_wolof_response(text: str, original_question: str = "") -> str:
     """
     Vérifie si la réponse contient trop de français.
-    Si oui, relance un appel de nettoyage ciblé (une seule fois).
-    Beaucoup plus léger que la double-correction systématique de l'ancien code.
+    Si oui, relance UN SEUL appel de nettoyage ciblé, en lui donnant aussi
+    la question d'origine pour qu'il ne dérive jamais vers un autre sujet
+    pendant la réécriture (il ne fait que corriger la langue, pas le fond).
     """
-    # Heuristique : mots français très courants qui ne devraient pas apparaître
     french_markers = [
         "je suis", "je vais", "c'est", "il y a", "pour vous",
         "nous allons", "vous pouvez", "bonjour", "merci beaucoup",
@@ -628,7 +483,6 @@ def _clean_wolof_response(text: str) -> str:
     if french_count < 2:
         return text
 
-    # Sinon : un appel de nettoyage ciblé
     try:
         correction = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -641,12 +495,21 @@ def _clean_wolof_response(text: str) -> str:
                         "Yaw mooy éditeur bu wolof.\n"
                         "Jëfandikoo wolof rekk — bul jëfandikoo français.\n"
                         "Réécris le texte suivant en wolof naturel du Sénégal.\n"
-                        "Conserve le sens exact — ne change pas le sujet, ne rajoute pas d'informations.\n"
+                        "Conserve EXACTEMENT le même sens et le même sujet — "
+                        "ne rajoute aucune information, ne réponds pas à autre "
+                        "chose que ce que le texte dit déjà.\n"
                         "Ne traduis pas mot à mot.\n"
-                        "Réponds uniquement avec le texte wolof réécrit."
+                        "Réponds uniquement avec le texte wolof réécrit, rien d'autre."
                     )
                 },
-                {"role": "user", "content": text}
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question d'origine de l'utilisateur (pour contexte, "
+                        f"ne pas y répondre à nouveau) : {original_question}\n\n"
+                        f"Texte à réécrire en wolof naturel :\n{text}"
+                    )
+                }
             ]
         )
         cleaned = correction.choices[0].message.content.strip()
