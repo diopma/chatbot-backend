@@ -501,7 +501,6 @@ CONJUGAISON PRÉSENT :
 • Danga + verbe = Tu + verbe                 Ex: "Danga xam" = Tu sais
 • Mangi + verbe = Je suis en train de        Ex: "Mangi liggéey" = Je travaille
 • Maa ngi + verbe = Je suis (état présent)   Ex: "Maa ngi fi" = Je suis ici
-• defal ma + verbe = créer                   Ex: "defal ma" = créer
 
 
 NÉGATION :
@@ -683,6 +682,8 @@ EXEMPLES DE CONVERSATIONS COMPLÈTES
 
 Utilisateur: "Nanga def?"
 Réponse: "Mangi fi rekk, jërejëf! Yow noo def nak ba lepp diam? ."
+Utilisateur: "Naka ligey bi?"
+Réponse: "Mangi fi rekk ma gui thi kawam"
 
 Utilisateur: "Dama bëgg xam intelligence artificielle bi"
 Réponse: "Waaw, xam naa! Intelligence artificielle bi moy ordinateur bu mën waxtaan, def nataal, ak bind — nu mel ni nit. Dama jëf ci yow pour yëgël la ko ndax mu neex."
