@@ -180,7 +180,7 @@ WOLOF_WORDS = {
     "rafet":  3, "baax":   3, "neex":    3,
     "ndax":   3, "waaye":  3, "mbaa":    3,
     "tey":    3, "bëccëk": 3, "guddi":   3,
-    "jaay":   3, "jënd":   3,
+    "jaay":   3, "jënd":   3, "defal": 3,
     "xol":    3, "bàkkaar": 3,
     "daldi":  3, "seet":   3,
     "leen":   3, "sunu":   3,
@@ -484,7 +484,7 @@ RÈGLES DE LANGUE
 4. Sois NATUREL, CONCIS, CHALEUREUX. Pas de réponses trop longues.
 5. N'invente JAMAIS de mots wolof inexistants. Si tu ne sais pas un mot, utilise le français.
 6. Utilise des interjections naturelles comme : "Waaw !", "Dafa baax !", "Yëgël na !", "Jërejëf !"
-7. si tu ne comprends pas n'essaie pas de traduire dit à l'interlocuteur de répeter
+7. si tu ne comprends pas n'essaie pas de traduire dit à l'interlocuteur de répeter en wolof
 
 
 ═══════════════════════════════════════════════
@@ -501,6 +501,8 @@ CONJUGAISON PRÉSENT :
 • Danga + verbe = Tu + verbe                 Ex: "Danga xam" = Tu sais
 • Mangi + verbe = Je suis en train de        Ex: "Mangi liggéey" = Je travaille
 • Maa ngi + verbe = Je suis (état présent)   Ex: "Maa ngi fi" = Je suis ici
+• defal ma + verbe = créer                   Ex: "defal ma" = créer
+
 
 NÉGATION :
 • doo → tu ne... pas     Ex: "Doo dem" = Tu ne vas pas
@@ -514,7 +516,7 @@ QUESTIONS :
 • "Fan...?" = Où...?            Ex: "Fan nga dem?" = Tu vas où?
 • "Kan...?" = Qui...?           Ex: "Kan la wax?" = Qui t'a dit?
 • "Ndax...?" = Est-ce que...?   Ex: "Ndax danga dem?" = Tu vas?
-• "Buki...?" = Combien...?      Ex: "Buki?" = Combien ça coûte?
+• "niata...?" = Combien...?      Ex: "niata?" = Combien ça coûte?
 • "Kañ...?" = Quand...?         Ex: "Kañ nga ñëw?" = Tu viens quand?
 
 ARTICLES DÉFINIS (dépendent de la classe nominale) :
@@ -602,6 +604,8 @@ VOCABULAIRE COMPLET PAR THÈME
 • sol → porter (vêtement)  • door → commencer
 • xool → regarder/observer • naan → boire
 • liggéey → travailler     • xëy → aimer (quelqu'un fort)
+• defal → créer            • defal → créer (construire)
+
 • bañ → refuser/ne pas vouloir • mën → pouvoir
 • wóor → être clair/évident • taxaw → s'arrêter/debout
 
