@@ -8,16 +8,12 @@ import io
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
-from gtts import gTTS
-import asyncio
-import edge_tts
-from pypdf import PdfReader
 
 app = Flask(__name__)
 CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY     = os.getenv("GROQ_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
 if not GROQ_API_KEY:
@@ -25,788 +21,820 @@ if not GROQ_API_KEY:
 
 client = Groq(api_key=GROQ_API_KEY)
 
-# ─────────────────────────────────────────────
-# IMAGE CONFIG
-# ─────────────────────────────────────────────
-# NOTE : ces prompts de style étaient auparavant des stubs tronqués
-# (ex: "minimalist professional flat vector logo...") — le "..." était
-# envoyé TEL QUEL à l'API d'image, ce qui polluait la requête et ne
-# donnait quasiment aucune indication de style utile. Ils sont maintenant
-# écrits en entier.
+# ─────────────────────────────────────────────────────────────
+# IMAGE STYLES & SIZES
+# ─────────────────────────────────────────────────────────────
 TYPE_PROMPTS = {
-    "logo": (
-        "minimalist professional flat vector logo design, clean lines, "
-        "balanced composition, simple and memorable, suitable for branding, "
-        "centered on plain background, no mockup, no watermark"
-    ),
-    "icon": (
-        "simple modern flat app icon, bold shapes, single clear symbol, "
-        "clean vector style, centered, no text, no watermark"
-    ),
-    "illustration": (
-        "vibrant detailed illustration with african art influences, "
-        "rich colors, expressive, high quality digital art, no watermark"
-    ),
-    "photo": (
-        "photorealistic DSLR photo, natural lighting, sharp focus, "
-        "high detail, realistic textures, no watermark"
-    ),
-    "pattern": (
-        "seamless repeating pattern inspired by african kente textile, "
-        "vibrant colors, symmetrical, tileable, high detail, no watermark"
-    ),
-    "banner": (
-        "modern marketing banner design, bold typography space, balanced "
-        "layout, professional color palette, wide format, no watermark"
-    ),
-    "avatar": (
-        "professional portrait style avatar, centered face, clean "
-        "background, friendly and approachable, high quality, no watermark"
-    ),
-    "poster": (
-        "eye-catching poster design, strong visual hierarchy, bold colors, "
-        "professional composition, high quality, no watermark"
-    ),
-    "general": (
-        "high quality digital art, detailed, professional, no watermark"
-    ),
+    "logo":         "minimalist professional flat vector logo, clean sharp edges, bold colors, white background, centered composition, SVG style",
+    "icon":         "simple modern app icon, flat design, bold colors, clean lines, centered, rounded corners",
+    "illustration": "vibrant detailed african art illustration, rich warm colors, professional digital painting, intricate patterns",
+    "photo":        "photorealistic professional DSLR photo, sharp focus, perfect lighting, 8k resolution, high detail",
+    "pattern":      "beautiful seamless african kente textile pattern, vibrant traditional colors, intricate geometric weave",
+    "banner":       "modern professional wide marketing banner, bold typography, vibrant gradient colors, eye-catching",
+    "avatar":       "professional portrait photo, centered face, studio lighting, sharp focus, neutral background",
+    "poster":       "eye-catching event poster design, bold typography, vibrant colors, dynamic composition",
+    "general":      "high quality professional digital art, vibrant colors, sharp details, 4k, masterpiece",
 }
 
 TYPE_SIZES = {
-    "logo": (1024, 1024),
-    "icon": (512, 512),
-    "illustration": (768, 1024),
-    "photo": (1024, 1024),
-    "pattern": (1024, 1024),
-    "banner": (1024, 512),
-    "avatar": (512, 512),
-    "poster": (768, 1024),
-    "general": (1024, 1024),
+    "logo":         (1024, 1024),
+    "icon":         (512,  512),
+    "illustration": (768,  1024),
+    "photo":        (1024, 1024),
+    "pattern":      (1024, 1024),
+    "banner":       (1024, 512),
+    "avatar":       (512,  512),
+    "poster":       (768,  1024),
+    "general":      (1024, 1024),
 }
 
-# ─────────────────────────────────────────────
-# IMAGE INTENT DETECTION
-# ─────────────────────────────────────────────
-# Ordre volontaire du plus spécifique au plus générique : un mot-clé
-# spécifique (ex: "logo") doit gagner sur un mot-clé générique (ex: "image")
-# même si les deux apparaissent dans le message.
-_IMAGE_TYPE_KEYWORDS = [
-    ("logo",         ["logo"]),
-    ("icon",         ["icône", "icon", "icone"]),
-    ("avatar",       ["avatar", "photo de profil", "pp "]),
-    ("banner",       ["bannière", "banniere", "banner", "cover"]),
-    ("poster",       ["poster", "affiche"]),
-    ("pattern",      ["motif", "pattern", "kente"]),
-    ("photo",        ["photo réaliste", "photo realiste", "photographie"]),
-    ("illustration", ["illustration", "dessin africain", "art africain"]),
+IMAGE_TYPE_KEYWORDS = {
+    "logo":         ["logo"],
+    "icon":         ["icône", "icone", "icon"],
+    "illustration": ["illustration", "art", "dessin", "nataal bu", "nataal yu rafet"],
+    "photo":        ["photo", "photographie", "réaliste", "realistic", "nataal bu dëkk"],
+    "pattern":      ["motif", "pattern", "kente", "wax", "textile", "tissu", "mbañ"],
+    "banner":       ["bannière", "banniere", "banner", "couverture", "nataal bu bon"],
+    "avatar":       ["avatar", "profil", "portrait", "visage", "seen bët", "sama bët"],
+    "poster":       ["affiche", "poster", "flyer", "nataal bu liggéey"],
+}
+
+IMAGE_TRIGGERS = [
+    "logo", "logos", "icône", "icones", "icon", "icons",
+    "illustration", "illustrations", "avatar", "avatars",
+    "bannière", "banniere", "banner", "banners",
+    "affiche", "poster", "posters", "flyer", "flyers",
+    "motif", "pattern", "patterns", "visuel", "visuels",
+    "dessin", "dessins", "portrait", "portraits",
+    "nataal", "nataalu", "nataalyi", "nataalye",
+    "sama nataal", "seen nataal", "yenn nataal",
+    "nataal bu rafet", "nataal bu baax",
+    "liggéey bu nataal", "liggeeyu nataal",
 ]
 
-_IMAGE_TRIGGER_WORDS = [
-    "logo", "image", "dessine", "crée", "créer", "génère", "genere",
-    "avatar", "poster", "icône", "icon", "bannière", "banner", "affiche",
-    "illustration", "motif", "photo",
-    "tëral sûret", "bind sûret", "def sûret",
+IMAGE_VERBS = [
+    "génère", "générer", "genere", "generer",
+    "crée", "créer", "cree", "creer",
+    "dessine", "dessiner", "fais", "faire",
+    "montre", "montrer", "produis", "produire",
+    "réalise", "realise", "imagine",
+    "génère-moi", "fais-moi", "crée-moi",
+    "generate", "create", "draw", "make", "render", "design",
+    "def", "defal", "deflu",
+    "bind", "bindal", "bindaale",
+    "yëgël", "yegal", "yëgëlal",
+    "def ma", "bind ma", "yëgël ma",
+    "yokk", "yokkal", "am", "amal",
+    "teg", "tegal", "daldi def", "daldi bind",
+    "seet", "seetal", "wone", "woneel",
 ]
 
+def _norm(text: str) -> str:
+    return (text.lower()
+        .replace("é","e").replace("è","e").replace("ê","e")
+        .replace("à","a").replace("â","a").replace("ç","c")
+        .replace("ù","u").replace("û","u").replace("î","i")
+        .replace("ï","i").replace("ô","o"))
 
-def _detect_image_type(msg_lower: str) -> str:
-    """Détecte le type d'image demandé (logo, avatar, poster, etc.) à
-    partir de mots-clés, plutôt que de renvoyer toujours 'general' — sinon
-    le prompt de style et les dimensions spécifiques ne sont jamais
-    utilisés, même quand l'utilisateur demande explicitement un logo."""
-    for gen_type, keywords in _IMAGE_TYPE_KEYWORDS:
-        if any(k in msg_lower for k in keywords):
-            return gen_type
-    return "general"
-
-
-def detect_image_intent(msg: str):
-    msg_lower = msg.lower()
-    if not any(t in msg_lower for t in _IMAGE_TRIGGER_WORDS):
+def detect_image_intent(msg: str) -> dict | None:
+    m     = _norm(msg)
+    words = m.split()
+    has_noun = any(_norm(n) in words or _norm(n) in m for n in IMAGE_TRIGGERS)
+    has_verb = any(_norm(v) in words or _norm(v) in m for v in IMAGE_VERBS)
+    if not (has_noun or (has_verb and has_noun)):
         return None
-
-    gen_type = _detect_image_type(msg_lower)
-    type_labels = {
-        "logo": ("Logo", "généré"), "icon": ("Icône", "générée"),
-        "avatar": ("Avatar", "généré"), "banner": ("Bannière", "générée"),
-        "poster": ("Poster", "généré"), "pattern": ("Motif", "généré"),
-        "photo": ("Photo", "générée"), "illustration": ("Illustration", "générée"),
-        "general": ("Image", "générée"),
-    }
-    label, participle = type_labels.get(gen_type, ("Image", "générée"))
-
+    gen_type = "general"
+    for t, keywords in IMAGE_TYPE_KEYWORDS.items():
+        if any(_norm(kw) in m for kw in keywords):
+            gen_type = t
+            break
     return {
-        "type": gen_type,
-        "visual_prompt": msg,
-        "confirmation_message": f"🎨 {label} {participle} !",
+        "type":                 gen_type,
+        "visual_prompt":        msg,
+        "confirmation_message": "🎨 Image générée !",
     }
 
-# ─────────────────────────────────────────────
-# SYSTEM PROMPTS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# DÉTECTION LANGUE — vocabulaire wolof étendu et pondéré
+# ─────────────────────────────────────────────────────────────
+WOLOF_WORDS = {
 
-# Prompt de base (français)
-SYSTEM_PROMPT_FR = (
-    "Tu es Yelen AI, un assistant intelligent, utile et bienveillant. "
-    "Tu réponds toujours en français, de manière claire et concise. "
-    "Tu es spécialisé dans le contexte africain et sénégalais."
-)
+    # ══ Score 5 : expressions uniquement wolof, très distinctives ══
+    "nanga def":        5, "nanga xam":       5, "nanga dem":       5,
+    "mangi fi rekk":    5, "maa ngi fi":      5, "mangi dem":       5,
+    "jërejëf lool":     5, "baal ma ko":      5, "waaw waaw":       5,
+    "dafa baax na":     5, "dafa neex na":    5, "dafa rafet na":   5,
+    "dafa mel ni":      5, "xam naa":         5, "faamaak":         5,
+    "amul solo":        5, "def ma":          5, "bind ma":         5,
+    "yëgël ma":         5, "soo bëgg":        5, "bëgg naa":        5,
+    "lu baax":          5, "lu neex":         5, "maa ngi dem":     5,
+    "asalaa maalekum":  5, "maalekum salaam": 5,
+    "dama bëgg":        5, "dama dem":        5, "dama nekk":       5,
+    "yow noo":          5, "lan moy":         5, "fan nga dem":     5,
+    "naka nga def":     5, "naka waay":       5,
+    "bul fekk":         5, "bul ko wax":      5,
+    "dëgg naa":         5, "dégg naa":        5,
+    "fii rekk":         5, "fi rekk":         5,
+    "mooy":             5, "mooye":           5,
+    "loolu moy":        5, "lool la":         5,
+    "waxoon na":        5, "waxoon naa":      5,
+    "liggéeyal ma":     5, "liggéeyal":       5,
+    "sëriñ":            5,
 
-# Prompt wolof — instructions précises pour maximiser la qualité
-SYSTEM_PROMPT_WO_BASE = """Yaw mooy Yelen AI, asistan bu xam-xam bu wolof wi Senegaal.
+    # ══ Score 4 : mots très distinctifs wolof ══
+    "jërejëf":  4, "jërëjëf":  4, "baal ma":   4,
+    "deedeet":  4, "mangi fi":  4, "mangi":     4,
+    "maa ngi":  4, "nataal":    4, "nataalu":   4,
+    "liggéey":  4, "liggeeyu":  4,
+    "dafa":     4, "dama":      4, "xam":       4,
+    "bëgg":     4, "siiw":      4, "rekk":      4,
+    "yëgël":    4, "woneel":    4, "wone":      4,
+    "ndanka":   4, "ndanka ndanka": 4,
+    "mbokk":    4, "xarit":     4,
+    "télé bi":  4, "kër gi":    4, "dekk bi":   4,
+    "suñu":     4, "sunu":      4,
+    "dëkk":     4, "xeex":      4,
+    "tubaab":   4, "nit":       4, "niit":      4,
+    "wolof":    4, "seereer":   4, "pulaar":    4,
+    "muñ":      4, "muñël":     4,
+    "tëgg":     4, "tëgël":     4,
+    "fëkk":     4, "fëkkeel":   4,
+    "digg":     4, "digël":     4,
+    "taaw":     4, "taawël":    4,
+    "soppi":    4, "soppil":    4,
+    "añ":       4, "añël":      4,
+    "jaaxle":   4, "jaaxal":    4,
+    "ñëlëm":    4, "xool":      4, "xoolël":    4,
+    "wëñ":      4, "wëñël":     4,
+    "bëgg bëgg": 4,
+    "ñaar":     4, "ñett":      4, "ñent":      4,
+    "juróom":   4, "fukk":      4, "téeméer":   4,
+    "junni":    4,
+    "ñaar fukk": 4, "ñett fukk": 4,
 
-SEET YI BU NJËKK (règles absolues) :
-- TËRAL REKK CI WOLOF — bul féexlu ci français, bul féexlu ci anglais.
-- Jëfandikoo wolof bu dëgg dëgg bu Dakar — moo tax nit ñi fi Senegaal xam nga.
-- Bul bind baat yu français ci kaw wolof (code-switching). Baat yu technique yu am solo rekk (exemple: "téléphone", "ordinateur", "internet") mën nga jëfandikoo waaye def ko wolof.
-- Bul tëjëli phrase yi ak "je", "tu", "il", "nous" — wolof rekk.
-- Bul bind "Je suis", "C'est", "Pour" ak yeneen baat yu français.
+    # ══ Score 3 : courants en wolof ══
+    "waaw":   3, "yow":    3, "moom":    3,
+    "laa":    3, "naa":    3, "nga":     3,
+    "nekk":   3, "topp":   3, "wax":     3,
+    "gis":    3, "gisul":  3,
+    "rafet":  3, "baax":   3, "neex":    3,
+    "ndax":   3, "waaye":  3, "mbaa":    3,
+    "tey":    3, "bëccëk": 3, "guddi":   3,
+    "jaay":   3, "jënd":   3,
+    "xol":    3, "bàkkaar": 3,
+    "daldi":  3, "seet":   3,
+    "leen":   3, "sunu":   3,
+    "fanaan": 3, "tëëy":   3,
+    "kaay":   3, "kaaye":  3,
+    "ñëw":    3, "dem":    3,
+    "lekk":   3, "dox":    3,
+    "bind":   3, "jëf":    3,
+    "tëdd":   3, "xaar":   3,
+    "jox":    3, "joxël":  3,
+    "naan":   3, "naanël":  3,
+    "xëy":    3, "xëyël":  3,
+    "teg":    3, "tegël":  3,
+    "fal":    3, "falël":  3,
+    "gën":    3, "gëna":   3,
+    "sol":    3, "solël":  3,
+    "door":   3, "doorël": 3,
 
-FOCUS BI (bul yokk yeneen mbir) :
-- Tontu SEEDE gu ñu la laaj — bul yokk mbir yu ñu laa ko laaj.
-- Bul bind lëkkalekaay, listes, ndax "ci lu ëpp", "am na itam", su nit bi laajul ko.
-- Bu nit bi laaj ab benn mbir rekk (misaal: "Nanga def ?"), tontu ko bu gaaw te bu leer — bul yokk wax yu ñu laa ko laaj.
-- Bu jarul, bul jàppale ci fin bi ak laaj bu bees walla suggestion — reer nit bi mooy jël jataay bi.
+    # ══ Score 2 : particules, pronoms, articles wolof ══
+    "ak":   2, "sama":  2, "seen":  2,
+    "ci":   2, "bi":    2, "yi":    2,
+    "bu":   2, "si":    2, "gi":    2,
+    "ki":   2, "ji":    2, "li":    2,
+    "baay": 2, "yaay":  2, "xale":  2,
+    "goor": 2, "jigéen": 2, "doom": 2,
+    "benn": 2, "lool":  2, "def":   2,
+    "am":   2, "ko":    2, "len":   2,
+    "mu":   2, "nu":    2, "ñu":    2,
+    "set":  2, "setal": 2, "tax":   2,
+    "di":   2, "la":    2, "le":    2,
+    "na":   2, "ni":    2, "fi":    2,
+    "ba":   2, "ca":    2, "ga":    2,
+    "mo":   2, "ñi":    2,
 
-XEEYU BI (style bu naturel) :
-- Wax na ni ku wax ak xarit ci Dakar — bu ràññiku, bu neex, bu yomb.
-- Jëfandikoo phrases yu gàtt, bu bari waxtaan bu araam walla bu am solo lool.
-- Bul jëfandikoo istil bu "asistan bu ëmb xibaar" (bul bind "Voici les informations suivantes", "Tout d'abord", "En conclusion" ci wolof itam) — wax rekk ni ku wax ci digg-digg.
-- Jëfandikoo baat yu wolof bu dëgg dëgg : "waaw", "déedéet", "dafa", "mën", "bëgg", "rekk", "fi", "lool", "bi", "yi", "si", "mi", "kon", "waye", "léegi".
-- Su nit bi wax ci wax bu gàtt (bonjour, jërëjëf, waaw), tontu ko itam bu gàtt — bul yokk paragraphe bu gudd.
-"""
-
-# ─────────────────────────────────────────────
-# EXEMPLES DE STYLE WOLOF — SÉLECTION DYNAMIQUE PAR DOMAINE
-# ─────────────────────────────────────────────
-# Pourquoi dynamique plutôt qu'une liste statique unique :
-# - Une liste statique unique doit rester COURTE (sinon risque de collision
-#   de sujet, voir le bug corrigé précédemment) mais du coup elle ne peut
-#   pas bien illustrer le ton pour tous les types de questions.
-# - En choisissant 2-3 exemples DU MÊME DOMAINE que la question posée
-#   (salutation, remerciement, question factuelle, demande d'aide, refus),
-#   le modèle reçoit un modèle de phrasé pertinent pour CE cas précis,
-#   sans jamais voir d'exemples d'autres sujets qui pourraient le distraire.
-# - Ces exemples ne sont JAMAIS envoyés comme faux tours user/assistant :
-#   ils restent uniquement dans le system prompt, présentés explicitement
-#   comme des modèles de ton à ignorer sur le fond.
-
-WOLOF_DOMAIN_EXAMPLES = {
-    "salutation": [
-        ('"Nanga def ?"', '"Mangi fi rekk. Yow nag, naka nga def ?"'),
-        ('"Asalaam maalekum."', '"Maalekum salaam. Naka nga def ?"'),
-        ('"Ba beneen yoon."', '"Ba beneen yoon, yàlla na la yàgg."'),
-    ],
-    "remerciement": [
-        ('"Jërëjëf lool !"', '"Amul solo."'),
-        ('"Yelen AI dafa baax lool !"', '"Jërëjëf, sama xol dafa sedd ci sa wax."'),
-    ],
-    "demande_aide": [
-        ('"Ndax mën nga dimbali ma ?"', '"Waaw, wax ma li nga bëgg."'),
-        ('"Lu nga man ?"', '"Mën naa tontu laaj yi, dimbali ci bind ak yeneen mbir."'),
-    ],
-    "refus": [
-        ('"Mën nga def ma ata bu xonq ?"', '"Baal ma, duma mën ci loolu."'),
-        ('"Mën nga may xaalis ?"', '"Déedéet, mënuma may xaalis."'),
-    ],
-    "question_factuelle": [
-        ('"Lan mooy internet ?"', '"Internet mooy lëkkalekaay bu mag buy boole nit ñi ci aduna bi."'),
-        ('"Ñaar yokk ak ñett ?"', '"Ñaar yokk ak ñett mooy juróom."'),
-    ],
-    "generic": [
-        ('"Nanga def ?"', '"Mangi fi rekk. Yow nag, naka nga def ?"'),
-        ('"Jërëjëf lool !"', '"Amul solo."'),
-    ],
+    # ══ Expressions nouchi dakarois (mélange wolof-français) ══
+    "dafa nice":    3, "dafa good":    3, "dafa classe":   3,
+    "waaw frère":   3, "waaw sama xarit": 3,
+    "bonne journée bi": 3, "bonne nuit bi": 3,
+    "incha allah":  2, "alhamdoulilah": 2,
+    "bismillah":    2, "masha allah":   2,
+    "yalla":        3, "yalla boole":   3,
+    "baraka":       3, "baraka allah":  3,
 }
 
-# Mots-clés heuristiques pour deviner le domaine sans appel LLM supplémentaire
-# (rapide, pas de coût ni de latence en plus).
-_DOMAIN_KEYWORDS = {
-    "salutation": ["nanga def", "asalaam", "salaam", "naka nga def", "ba beneen", "bonjour", "salut"],
-    "remerciement": ["jërëjëf", "jerejef", "merci", "dieuredieuf"],
-    "demande_aide": ["dimbali", "mën nga", "aide", "aidez", "wax ma"],
-    "refus": ["mën nga def ma", "mën nga may", "peux-tu me donner", "donne moi"],
-    "question_factuelle": ["lan mooy", "c'est quoi", "qu'est-ce que", "combien", "yokk", "wàññi"],
-}
+def detect_language(text: str) -> str:
+    t = text.lower()
 
-# Glossaire de connecteurs naturels neutres (aucun sujet attaché).
-# Sert à donner un phrasé plus oral/vivant sans donner de contenu à copier.
-WOLOF_CONNECTORS = """
-CONNECTEURS NATURELS (jëfandikoo yu neex ngir wax bu araam, bul jël leen ni
-réponse — yeen dañuy jur rekk phrasé bi) :
-- Ouvertures : "Dégg naa...", "Lu jëkk...", "Ci lu jëkk..."
-- Enchaînements : "Ci kaw loolu...", "Boobu la...", "Ci gëstu bi..."
-- Nuances : "waaye...", "kon...", "léegi...", "moo tax..."
-- Confirmation/accord : "waaw dëgg la...", "moom lañu wax..."
-"""
+    wolof_score = 0
+    for word, weight in WOLOF_WORDS.items():
+        if word in t:
+            wolof_score += weight
 
+    french_words = [
+        "je", "tu", "il", "elle", "nous", "vous",
+        "les", "des", "une", "est", "avec", "bonjour",
+        "merci", "comment", "pourquoi", "mais", "donc",
+        "alors", "parce", "quand", "pour", "dans",
+        "que", "qui", "quoi", "voici", "voilà",
+        "très", "bien", "mal", "ici", "là",
+    ]
+    french_score = sum(1 for w in french_words if f" {w} " in f" {t} ")
 
-def _detect_wolof_domain(user_message: str) -> str:
-    """Devine le domaine (salutation, remerciement, etc.) via mots-clés
-    simples — pas d'appel LLM supplémentaire, donc pas de latence en plus."""
-    msg = user_message.lower()
-    for domain, keywords in _DOMAIN_KEYWORDS.items():
-        if any(k in msg for k in keywords):
-            return domain
-    return "generic"
+    print(f"[LANG SCORE] wolof={wolof_score} french={french_score} | text='{t[:60]}'")
+
+    if wolof_score >= 3:                          return "wolof"
+    if wolof_score >= 2 and french_score <= 3:    return "wolof"
+    if wolof_score >= 1 and french_score >= 1:    return "wolof"
+    if french_score >= 3:                         return "french"
+    return "french"
 
 
-def build_wolof_system_prompt(user_message: str) -> str:
-    """Construit le system prompt wolof avec 2-3 exemples du domaine
-    détecté seulement — jamais tous les domaines à la fois, pour éviter
-    tout risque de collision de sujet."""
-    domain = _detect_wolof_domain(user_message)
-    examples = WOLOF_DOMAIN_EXAMPLES.get(domain, WOLOF_DOMAIN_EXAMPLES["generic"])
+# ─────────────────────────────────────────────────────────────
+# EXTRACTION TEXTE DOCUMENT
+# ─────────────────────────────────────────────────────────────
+def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
+    ext = filename.lower().split(".")[-1] if "." in filename else ""
+    print(f"[DOC] Extension: {ext} | Taille: {len(file_bytes)} bytes")
 
-    examples_block = "\n".join(f"- {q} → {a}" for q, a in examples)
+    if ext in ("txt", "md", "csv", "json", "xml", "html", "py", "js"):
+        try:
+            return file_bytes.decode("utf-8", errors="replace")[:15000]
+        except Exception as e:
+            return f"Erreur lecture texte: {e}"
 
-    style_block = f"""
-EXEMPLES DE STYLE WOLOF (à titre d'illustration UNIQUEMENT — ce ne sont PAS
-des messages échangés avec l'utilisateur actuel. Ignore totalement leur
-sujet, retiens seulement le ton et la longueur des réponses) :
-
-{examples_block}
-
-RÈGLES ABSOLUES DE PERTINENCE ET DE NATUREL :
-1. Réponds UNIQUEMENT à la question ou au message que l'utilisateur envoie MAINTENANT — jamais à un autre sujet, même si un exemple ci-dessus semble proche.
-2. N'utilise JAMAIS le contenu ou le sujet d'un exemple ci-dessus comme réponse, sauf si l'utilisateur pose EXACTEMENT cette même question.
-3. Ne change jamais de sujet de ta propre initiative.
-4. Ne rajoute pas de digression, de conseil non demandé, ou de question de relance à la fin — arrête-toi dès que tu as répondu à ce qui a été demandé.
-5. Une question courte et simple mérite une réponse courte et simple — pas un exposé.
-"""
-
-    return SYSTEM_PROMPT_WO_BASE + "\n" + WOLOF_CONNECTORS + "\n" + style_block
-
-
-# Conservé pour compatibilité (utilisé par analyze_document, qui ne connaît
-# pas le domaine précis à l'avance) : version générique statique.
-SYSTEM_PROMPT_WO = build_wolof_system_prompt("")
-
-# ─────────────────────────────────────────────
-# IMAGE GENERATION
-# ─────────────────────────────────────────────
-def generate_image(prompt: str, gen_type: str):
-    # AVANT : le prompt de style générique était collé directement devant
-    # la description de l'utilisateur, sans séparateur, et les dimensions
-    # étaient toujours 1024x1024 quel que soit le type (TYPE_SIZES n'était
-    # jamais utilisé). Résultat : un logo pouvait sortir au mauvais format
-    # et le prompt final était confus pour l'API d'image.
-    #
-    # Maintenant : la description de l'utilisateur (couleurs, texte, style
-    # demandés) passe EN PREMIER — c'est elle qui prime — suivie du style
-    # de fond correspondant au type détecté, et les dimensions adaptées
-    # au type sont utilisées.
-    style_suffix = TYPE_PROMPTS.get(gen_type, TYPE_PROMPTS["general"])
-    full_prompt = f"{prompt}, {style_suffix}"
-
-    width, height = TYPE_SIZES.get(gen_type, TYPE_SIZES["general"])
-
-    encoded = urllib.parse.quote(full_prompt)
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&nologo=true"
-    )
-    try:
-        res = requests.get(url, timeout=60)
-        return base64.b64encode(res.content).decode()
-    except Exception as e:
-        print("[IMAGE ERROR]", e)
-        return None
-
-# ─────────────────────────────────────────────
-# IMAGE VISION
-# ─────────────────────────────────────────────
-def _detect_image_mime(raw_bytes: bytes) -> str:
-    if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if raw_bytes.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if raw_bytes.startswith(b"GIF87a") or raw_bytes.startswith(b"GIF89a"):
-        return "image/gif"
-    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/jpeg"
-
-
-def analyze_image_base64(image_base64: str, question: str, lang: str = "fr"):
-    try:
-        raw_bytes = base64.b64decode(image_base64)
-        mime = _detect_image_mime(raw_bytes)
-        data_url = f"data:{mime};base64,{image_base64}"
-
-        # Adapter l'instruction selon la langue
-        if lang == "wo":
-            instruction = f"Seet sûret bii ci wolof bu dëgg dëgg. {question}"
-        else:
-            instruction = question
-
-        r = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                }
-            ],
-            temperature=0.5,
-            max_tokens=600,
-        )
-        return r.choices[0].message.content
-    except Exception as e:
-        print("[VISION ERROR]", e)
-        return None
-
-# ─────────────────────────────────────────────
-# DOCUMENT (PDF)
-# ─────────────────────────────────────────────
-MAX_DOC_CHARS = 15000
-
-def extract_pdf_text(pdf_base64: str):
-    try:
-        raw_bytes = base64.b64decode(pdf_base64)
-        reader = PdfReader(io.BytesIO(raw_bytes))
-
-        if reader.is_encrypted:
-            return None, "Le PDF est protégé par mot de passe."
-
-        pages_text = []
-        for page in reader.pages:
+    if ext == "pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            for page in reader.pages[:20]:
+                text += page.extract_text() or ""
+            return text[:15000] if text.strip() else "PDF sans texte extractible (probablement scanné)."
+        except ImportError:
             try:
-                pages_text.append(page.extract_text() or "")
-            except Exception:
-                continue
+                import PyPDF2
+                reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+                text = ""
+                for page in reader.pages[:20]:
+                    text += page.extract_text() or ""
+                return text[:15000]
+            except Exception as e:
+                return f"Erreur lecture PDF: {e}"
+        except Exception as e:
+            return f"Erreur PDF: {e}"
 
-        full_text = "\n\n".join(t for t in pages_text if t.strip())
+    if ext == "docx":
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(file_bytes))
+            text = "\n".join([para.text for para in doc.paragraphs])
+            return text[:15000]
+        except ImportError:
+            return "❌ python-docx non installé."
+        except Exception as e:
+            return f"Erreur DOCX: {e}"
 
-        if not full_text.strip():
-            return None, "Aucun texte détecté (le PDF est probablement une image scannée)."
+    if ext in ("xlsx", "xls"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+            text = ""
+            for sheet in wb.sheetnames[:3]:
+                ws = wb[sheet]
+                text += f"\n--- Feuille: {sheet} ---\n"
+                for row in ws.iter_rows(max_row=100, values_only=True):
+                    row_text = " | ".join([str(c) for c in row if c is not None])
+                    if row_text.strip():
+                        text += row_text + "\n"
+            return text[:15000]
+        except ImportError:
+            return "❌ openpyxl non installé."
+        except Exception as e:
+            return f"Erreur XLSX: {e}"
 
-        if len(full_text) > MAX_DOC_CHARS:
-            full_text = full_text[:MAX_DOC_CHARS] + "\n\n[...document tronqué, trop long...]"
-
-        return full_text, None
-
-    except Exception as e:
-        print("[PDF ERROR]", e)
-        return None, f"Impossible de lire ce PDF : {e}"
+    return f"❌ Format '{ext}' non supporté. Formats acceptés : PDF, DOCX, TXT, CSV, XLSX, MD."
 
 
-def analyze_document(doc_text: str, question: str, lang: str = "fr"):
-    try:
-        system = SYSTEM_PROMPT_WO if lang == "wo" else SYSTEM_PROMPT_FR
-        prompt = (
-            "Voici le contenu d'un document fourni par l'utilisateur :\n\n"
-            f"---\n{doc_text}\n---\n\n"
-            f"Question : {question}"
+# ─────────────────────────────────────────────────────────────
+# ANALYSE DOCUMENT VIA LLM
+# ─────────────────────────────────────────────────────────────
+def analyze_document(doc_text: str, filename: str, question: str, lang: str) -> str:
+    if lang == "wolof":
+        system = (
+            "Tu es Yelen AI, assistant sénégalais expert en analyse de documents. "
+            "Réponds en français ou wolof selon la langue de la question. "
+            "Analyse le document fourni et réponds précisément à la question posée. "
+            "Sois concis et clair."
         )
+    else:
+        system = (
+            "Tu es Yelen AI, un assistant expert en analyse de documents. "
+            "Analyse le document fourni et réponds précisément à la question posée. "
+            "Sois concis, structuré et clair. Réponds en français."
+        )
+
+    q = question.strip() if question.strip() else "Fais un résumé complet de ce document."
+    prompt = f'Voici le contenu du document "{filename}" :\n\n---\n{doc_text[:12000]}\n---\n\nQuestion : {q}'
+
+    try:
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
+                {"role": "user",   "content": prompt},
             ],
-            temperature=0.5,
-            max_tokens=700,
+            temperature=0.3,
+            max_tokens=1000,
         )
         return r.choices[0].message.content
     except Exception as e:
-        print("[DOC ANALYSIS ERROR]", e)
-        return None
-
-# ─────────────────────────────────────────────
-# TEXT TO SPEECH
-# ─────────────────────────────────────────────
-def _edge_tts_sync(text: str, voice: str, out_path: str):
-    async def _run():
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(out_path)
-    asyncio.run(_run())
+        print(f"[DOC LLM ERR] {e}")
+        return f"❌ Erreur lors de l'analyse : {str(e)}"
 
 
-def text_to_speech_base64(text: str, lang: str = "fr", max_retries: int = 2):
-    # Voix adaptée à la langue détectée
-    # Pour le wolof, on utilise une voix française proche phonétiquement
-    voice = "fr-FR-DeniseNeural" if lang in ("fr", "wo") else "fr-FR-DeniseNeural"
-    errors = []
-
-    # ── Tentative 1 : edge-tts ──
-    for attempt in range(max_retries + 1):
-        tmp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                tmp_path = tmp.name
-            _edge_tts_sync(text, voice, tmp_path)
-
-            with open(tmp_path, "rb") as f:
-                audio_bytes = f.read()
-
-            if not audio_bytes:
-                raise ValueError("fichier audio vide généré par edge-tts")
-
-            return base64.b64encode(audio_bytes).decode(), None
-
-        except Exception as e:
-            err = f"edge-tts tentative {attempt + 1}: {type(e).__name__}: {e}"
-            print("[TTS ERROR]", err)
-            errors.append(err)
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-
-    # ── Tentative 2 (fallback) : gTTS ──
-    gtts_lang = "fr"  # gTTS ne supporte pas le wolof, français par défaut
-    for attempt in range(max_retries + 1):
-        tmp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                tmp_path = tmp.name
-            tts = gTTS(text=text, lang=gtts_lang)
-            tts.save(tmp_path)
-
-            with open(tmp_path, "rb") as f:
-                audio_bytes = f.read()
-
-            if not audio_bytes:
-                raise ValueError("fichier audio vide généré par gTTS")
-
-            return base64.b64encode(audio_bytes).decode(), None
-
-        except Exception as e:
-            err = f"gTTS tentative {attempt + 1}: {type(e).__name__}: {e}"
-            print("[TTS ERROR]", err)
-            errors.append(err)
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-
-    return None, " | ".join(errors)
-
-# ─────────────────────────────────────────────
-# SPEECH TO TEXT (Whisper via Groq)
-# ─────────────────────────────────────────────
-def transcribe_audio_base64(audio_base64: str):
-    tmp_path = None
-    try:
-        audio_bytes = base64.b64decode(audio_base64)
-
-        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-
-        with open(tmp_path, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(tmp_path), f.read()),
-                model="whisper-large-v3-turbo",
-                response_format="text",
-                # Hint wolof+français pour améliorer la transcription
-                prompt="Senegaal, wolof, français, Dakar",
-            )
-
-        text = transcription if isinstance(transcription, str) else getattr(transcription, "text", "")
-        return text.strip() if text else None
-
-    except Exception as e:
-        print("[STT ERROR]", e)
-        return None
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-# ─────────────────────────────────────────────
-# DÉTECTION DE LANGUE
-# ─────────────────────────────────────────────
-# NOTE : une seule fonction detect_language (LLM-based). L'ancienne
-# version avait DEUX définitions de detect_language (une heuristique
-# par comptage de mots-clés, puis une seconde basée sur un appel LLM qui
-# écrasait silencieusement la première). Garder une seule version évite
-# toute confusion sur celle qui est réellement utilisée.
-def detect_language(text: str) -> str:
-    """
-    Détecte si le message est en wolof ('wo') ou en français ('fr').
-    Utilise un LLM rapide avec un prompt enrichi et des exemples clés
-    pour réduire les faux négatifs sur le wolof.
-    """
+# ─────────────────────────────────────────────────────────────
+# TRADUCTION PROMPT → ANGLAIS
+# ─────────────────────────────────────────────────────────────
+def translate_prompt_to_english(prompt: str) -> str:
     try:
         r = client.chat.completions.create(
-            model="llama-3.3-8b-instant",
+            model="llama-3.1-8b-instant",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Détecte la langue principale du message utilisateur.\n"
-                        "Réponds UNIQUEMENT par 'fr' ou 'wo', rien d'autre.\n\n"
-                        "Indices wolof (si tu vois ces mots → 'wo') :\n"
-                        "nanga, mangi, waaw, déedéet, jërëjëf, ndax, mën, mooy, "
-                        "lañ, dafa, bëgg, rekk, fi, lool, bi, yi, si, mi, "
-                        "naka, jàmm, xam, wax, def, dem, ñëw, jëf, baal, "
-                        "sama, yow, moom, yëgël, tëral, liggéey, xol, sedd.\n\n"
-                        "Si le message mélange les deux langues, choisis la langue dominante.\n"
-                        "Réponds uniquement : fr ou wo"
-                    )
-                },
-                {"role": "user", "content": text}
+                {"role": "system", "content": "You are an image prompt translator. Translate the user's request (in any language) into a detailed English image generation prompt. Return ONLY the English prompt, no explanation, no quotes."},
+                {"role": "user", "content": prompt}
             ],
-            temperature=0,
-            max_tokens=5,
+            temperature=0.2, max_tokens=120,
         )
-        lang = r.choices[0].message.content.strip().lower()[:2]
-        return lang if lang in ("fr", "wo") else "fr"
+        translated = r.choices[0].message.content.strip()
+        print(f"[PROMPT EN] {translated}")
+        return translated
+    except Exception as e:
+        print(f"[TRANSLATE ERR] {e}")
+        return prompt
 
+# ─────────────────────────────────────────────────────────────
+# GÉNÉRATION IMAGE
+# ─────────────────────────────────────────────────────────────
+def generate_image(prompt: str, gen_type: str) -> str | None:
+    english = translate_prompt_to_english(prompt)
+    prefix  = TYPE_PROMPTS.get(gen_type, "")
+    full    = f"{prefix}, {english}, masterpiece, best quality, ultra detailed, sharp"
+    w, h    = TYPE_SIZES.get(gen_type, (1024, 1024))
+    print(f"[IMAGE] type={gen_type} | {full[:80]}...")
+
+    if TOGETHER_API_KEY:
+        try:
+            r = requests.post(
+                "https://api.together.xyz/v1/images/generations",
+                headers={"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"},
+                json={"model": "black-forest-labs/FLUX.1-schnell-Free", "prompt": full, "width": min(w,1024), "height": min(h,1024), "steps": 4, "n": 1, "response_format": "b64_json"},
+                timeout=90,
+            )
+            r.raise_for_status()
+            return r.json()["data"][0]["b64_json"]
+        except Exception as e:
+            print("[FLUX ERR]", e)
+
+    try:
+        enc = urllib.parse.quote(full)
+        url = f"https://image.pollinations.ai/prompt/{enc}?width={w}&height={h}&nologo=true&enhance=true&model=flux"
+        res = requests.get(url, timeout=90)
+        return base64.b64encode(res.content).decode()
+    except Exception as e:
+        print("[POLLINATIONS ERR]", e)
+        return None
+
+# ─────────────────────────────────────────────────────────────
+# DÉTECTION MIME
+# ─────────────────────────────────────────────────────────────
+def get_mime(b64: str) -> str:
+    try:
+        h = base64.b64decode(b64[:20])
+        if h[:4] == b'\x89PNG':  return "image/png"
+        if h[:2] == b'\xff\xd8': return "image/jpeg"
+        if b'WEBP' in h:         return "image/webp"
     except Exception:
-        return "fr"
+        pass
+    return "image/jpeg"
 
-# ─────────────────────────────────────────────
-# CHAT HANDLER
-# ─────────────────────────────────────────────
-def handle_chat(user_message: str, history: list, want_audio_response: bool = False):
+# ─────────────────────────────────────────────────────────────
+# TRANSCRIPTION AUDIO
+# ─────────────────────────────────────────────────────────────
+def transcribe_audio(audio_bytes: bytes) -> str:
+    suffix, mime = ".m4a", "audio/mp4"
+    if len(audio_bytes) >= 4:
+        if audio_bytes[:4] == b'RIFF':
+            suffix, mime = ".wav", "audio/wav"
+        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+            suffix, mime = ".mp3", "audio/mpeg"
+        elif len(audio_bytes) > 8 and audio_bytes[4:8] == b'ftyp':
+            suffix, mime = ".m4a", "audio/mp4"
+        elif audio_bytes[:4] == b'OggS':
+            suffix, mime = ".ogg", "audio/ogg"
 
-    # ── Détection d'intention image ──
+    print(f"[AUDIO] {suffix} — {len(audio_bytes)} bytes")
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        path = tmp.name
+
+    try:
+        with open(path, "rb") as f:
+            result = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=(f"audio{suffix}", f, mime),
+                response_format="text",
+                prompt=(
+                    "Transcris exactement ce qui est dit en wolof sénégalais ou français. "
+                    "Le wolof a ces caractéristiques : ë (e avec tréma), ñ, ŋ, accent tonique. "
+                    "Mots wolof très fréquents : "
+                    "nanga def, mangi fi rekk, jërejëf, waaw, deedeet, dama, dafa, xam, "
+                    "dem, ñëw, lekk, wax, nekk, bi, yi, ci, ak, sama, bëgg, nataal, "
+                    "def ma, bind ma, xale, baay, yaay, xarit, mbokk, ndax, baal ma, "
+                    "yow, moom, sunu, seen, rekk, lool, daldi, kaay, ñu, mu, "
+                    "gis, jox, naan, teg, fal, sol, door, xool, soppi, muñ, "
+                    "tubaab, wolof, seereer, kër, suñu, yalla, baraka, incha allah, "
+                    "asalaa maalekum, maalekum salaam. "
+                    "Termes tech possibles : logo, image, avatar, créer, générer, intelligence artificielle."
+                ),
+            )
+        text = result if isinstance(result, str) else getattr(result, "text", str(result))
+        print(f"[WHISPER] texte={repr(text)}")
+        return (text or "").strip()
+    finally:
+        os.unlink(path)
+
+
+# ─────────────────────────────────────────────────────────────
+# SYSTÈME DE PROMPTS — WOLOF AMÉLIORÉ
+# ─────────────────────────────────────────────────────────────
+WOLOF_SYSTEM = """Tu es Yelen AI, un assistant IA sénégalais intelligent, chaleureux et moderne.
+Tu parles couramment le wolof et le français, comme un jeune Dakarois éduqué des années 2020.
+
+═══════════════════════════════════════════════
+RÈGLES DE LANGUE
+═══════════════════════════════════════════════
+
+1. MESSAGE EN WOLOF PUR → réponds EN WOLOF (avec du français technique si besoin).
+2. MESSAGE MÉLANGÉ wolof-français (nouchi dakarois) → réponds dans le MÊME style mélangé.
+3. MESSAGE EN FRANÇAIS PUR → réponds EN FRANÇAIS.
+4. Sois NATUREL, CONCIS, CHALEUREUX. Pas de réponses trop longues.
+5. N'invente JAMAIS de mots wolof inexistants. Si tu ne sais pas un mot, utilise le français.
+6. Utilise des interjections naturelles comme : "Waaw !", "Dafa baax !", "Yëgël na !", "Jërejëf !"
+
+═══════════════════════════════════════════════
+GRAMMAIRE WOLOF ESSENTIELLE
+═══════════════════════════════════════════════
+
+STRUCTURE DE BASE :
+• Sujet + Prédicat verbal + Objet
+• Le verbe s'accorde avec le focus (sujet ou verbe mis en avant)
+
+CONJUGAISON PRÉSENT :
+• Dama + verbe = Je + verbe (focus sujet)    Ex: "Dama dem" = Je vais
+• Dafa + verbe = Il/Elle + verbe             Ex: "Dafa lekk" = Il mange
+• Danga + verbe = Tu + verbe                 Ex: "Danga xam" = Tu sais
+• Mangi + verbe = Je suis en train de        Ex: "Mangi liggéey" = Je travaille
+• Maa ngi + verbe = Je suis (état présent)   Ex: "Maa ngi fi" = Je suis ici
+
+NÉGATION :
+• doo → tu ne... pas     Ex: "Doo dem" = Tu ne vas pas
+• duma → je ne... pas    Ex: "Duma dem" = Je ne vais pas
+•dul → il ne... pas     Ex: "Dul lekk" = Il ne mange pas
+• -ul (suffixe)          Ex: "Xamul" = Il ne sait pas, "Bëggul" = Il ne veut pas
+
+QUESTIONS :
+• "Naka...?" = Comment...?      Ex: "Naka nga def?" = Comment tu vas?
+• "Lan...?" = Quoi/Que...?      Ex: "Lan la?" = C'est quoi?
+• "Fan...?" = Où...?            Ex: "Fan nga dem?" = Tu vas où?
+• "Kan...?" = Qui...?           Ex: "Kan la wax?" = Qui t'a dit?
+• "Ndax...?" = Est-ce que...?   Ex: "Ndax danga dem?" = Tu vas?
+• "Buki...?" = Combien...?      Ex: "Buki?" = Combien ça coûte?
+• "Kañ...?" = Quand...?         Ex: "Kañ nga ñëw?" = Tu viens quand?
+
+ARTICLES DÉFINIS (dépendent de la classe nominale) :
+• bi = le/la (objets singuliers, personnes)  Ex: "xale bi" = l'enfant
+• gi = le/la (lieux, certains noms)          Ex: "kër gi" = la maison
+• ji = le/la (corps, certains noms)          Ex: "bopp ji" = la tête
+• yi = les (pluriel)                         Ex: "xale yi" = les enfants
+• si = le/la (certains objets)               Ex: "bis si" = le bus
+• ki = cette personne-ci                     Ex: "xale ki" = cet enfant-ci
+
+POSSESSION :
+• sama = mon/ma/mes           Ex: "sama xarit" = mon ami
+• sa = ton/ta/tes             Ex: "sa kër" = ta maison
+• mu = son/sa (3e pers sing)  Ex: "mu dem" = il/elle est parti(e)
+• sunu = notre                Ex: "sunu reew" = notre pays
+• seen = leur/leurs           Ex: "seen kër" = leur maison
+
+═══════════════════════════════════════════════
+VOCABULAIRE COMPLET PAR THÈME
+═══════════════════════════════════════════════
+
+── SALUTATIONS ──
+• "Nanga def?" / "Naka nga def?" → Comment vas-tu?
+• "Mangi fi rekk, jërejëf!" → Je vais bien, merci!
+• "Asalaa maalekum" → Paix sur vous (salut islamique)
+• "Maalekum salaam" → Et sur vous la paix
+• "Mbaa dëkk?" → Comment ça va? (informel)
+• "Yow noo?" → Et toi, comment tu vas?
+• "Dafa baax" → Ça va bien / C'est bien
+• "Fanaan?" → Tu as bien dormi?
+• "Naka suba si?" → Comment va ce matin?
+
+── REMERCIEMENTS / POLITESSE ──
+• "Jërejëf" → Merci
+• "Jërejëf lool" → Merci beaucoup
+• "Baal ma" → Excuse-moi / Pardon
+• "Baal ma ko" → Excuse-moi pour ça
+• "Amul solo" → Pas de problème / De rien
+• "Yëgël na!" → Je comprends! / Bien sûr!
+• "Waaw, yëgël naa" → Oui, je comprends
+• "Dëgg naa" → J'ai entendu / J'ai compris
+
+── OUI / NON / CONFIRMATION ──
+• "Waaw" → Oui
+• "Waaw waaw" → Oui oui (confirmer fort)
+• "Deedeet" → Non
+• "Siiw" / "Siiw rekk" → Exactement / C'est ça
+• "Dëgg" → Vrai / Exact
+• "Mën na" → C'est possible / Oui ça peut
+• "Mënul" → Ce n'est pas possible / Non
+• "Benn" → Non (fort refus)
+
+── ÉMOTIONS ET ÉTATS ──
+• "Dafa baax" / "Dafa baax na" → C'est bien
+• "Dafa neex" / "Dafa neex na" → C'est bon / C'est agréable
+• "Dafa rafet" / "Dafa rafet na" → C'est beau
+• "Dafa mel ni..." → Ça ressemble à...
+• "Neex na lool" → C'est vraiment bien
+• "Rafet lool" → C'est très beau
+• "Dafa xel" → C'est intelligent / Ça a l'air fort
+• "Dafa gëna baax" → C'est encore mieux
+• "Dafa metti" → C'est difficile / Ça fait mal
+• "Dafa sedd" → C'est froid
+• "Dafa tang" → C'est chaud
+• "Dafa am solo" → C'est important
+• "Amul solo" → Ça n'a pas d'importance
+• "Dafa xam" → Il/elle sait
+• "Xamul" → Il/elle ne sait pas
+
+── VERBES COURANTS ──
+• dem → aller              • ñëw → venir
+• lekk → manger            • naan → boire
+• wax → parler/dire        • xam → savoir/connaître
+• bëgg → vouloir/aimer     • gis → voir
+• jëf → faire (action)     • def → faire/créer
+• bind → écrire/dessiner   • dox → marcher/aller
+• jaay → vendre            • jënd → acheter
+• topp → suivre            • seet → regarder/chercher
+• nekk → être/se trouver   • am → avoir
+• fëkk → trouver           • tëdd → dormir/se coucher
+• xaar → attendre          • jox → donner
+• teg → mettre/poser       • fal → choisir
+• gën → dépasser/mieux     • muñ → supporter/patienter
+• soppi → changer          • añ → déjeuner
+• sol → porter (vêtement)  • door → commencer
+• xool → regarder/observer • naan → boire
+• liggéey → travailler     • xëy → aimer (quelqu'un fort)
+• bañ → refuser/ne pas vouloir • mën → pouvoir
+• wóor → être clair/évident • taxaw → s'arrêter/debout
+
+── PRONOMS ET PARTICULES ──
+• Man/Maa → Moi/Je          • Yow → Toi
+• Moom → Lui/Elle           • Nun/Nunu → Nous
+• Yéen → Vous               • Ñoom → Eux/Elles
+• Sama → Mon/Ma             • Sa → Ton/Ta
+• Bu/Bi/Gi → article défini • Yi → Les (pluriel)
+• Ci → à/dans/sur/y         • Ak → et/avec
+• Rekk → seulement/juste    • Lool → vraiment/beaucoup
+• Doon → était/avant (passé) • Dul → ne...pas (3e pers)
+
+── TEMPS ET MOMENTS ──
+• Tey → Aujourd'hui          • Démb → Hier
+• Elëgg → Demain             • Bëccëk → Ce matin
+• Guddi → Ce soir/La nuit    • Kere/Kerë → Midi/tantôt
+• Xawaré → L'après-midi      • Fanaan → Cette nuit passée
+• Ñaari fan → Dans deux jours • Bi tey → Aujourd'hui même
+
+── FAMILLE ──
+• Baay → Papa               • Yaay → Maman
+• Xale → Enfant             • Doom → Enfant (de qqn)
+• Mbeebar → Petit-enfant    • Mag → Aîné/grand(e)
+• Rakk → Cadet/cadette      • Jëkkër → Mari
+• Jabar → Femme (épouse)    • Mbokk → Parent/proche
+• Xarit → Ami(e)            • Goro → Camarade/pote
+
+── LIEUX ──
+• Kër → Maison              • Dëkk → Village/ville/quartier
+• Yëgël → Route (vers)      • Fii → Ici
+• Fale → Là-bas             • Fi ci kanam → Devant
+• Fi ci ginnaaw → Derrière  • Suuf bi → La terre/le sol
+• Géej bi → La mer          • Réew mi → Le pays
+
+── NOMBRES ──
+• Benn → 1    • Ñaar → 2    • Ñett → 3
+• Ñent → 4    • Juróom → 5  • Juróom benn → 6
+• Juróom ñaar → 7  • Juróom ñett → 8  • Juróom ñent → 9
+• Fukk → 10   • Fukk ak benn → 11  • Ñaar fukk → 20
+• Téeméer → 100  • Junni → 1000
+
+── EXPRESSIONS POPULAIRES DAKAR ──
+• "Kaay fi!" → Viens ici!
+• "Daldi dem!" → Vite, vas-y!
+• "Ndanka ndanka" → Doucement / Petit à petit
+• "Waaw rekk!" → Exactement!
+• "Maa ko def" → Je vais le faire / Je m'en occupe
+• "Xam naa" → Je sais / Je comprends
+• "Xamul" → Il/elle ne sait pas
+• "Dëkk bi dafa xew" → La ville bouge / Il se passe des choses
+• "Bu baax" → Si c'est bien
+• "Soo bëgg" → Si tu veux
+• "Jaraay na" → Il/elle s'est battu(e) / Il a essayé
+• "Bul faj!" → Ne t'inquiète pas! (litt: ne te soigne pas)
+• "Yaw la tax" → C'est à cause de toi
+• "Nit ku baax" → Une bonne personne
+• "Dafa am yaram" → Il/elle a du charisme / Il est classe
+• "Xam sa bopp" → Connais-toi toi-même / Fais attention
+• "Bëgg bëgg" → Vraiment vouloir / Adorer
+• "Dafa gëna rafet" → C'est encore plus beau
+
+── INTELLIGENCE ARTIFICIELLE EN WOLOF ──
+• "Intelligence artificielle" → "Intelligence artificielle bi" (on garde le terme français)
+• "Application bi" → L'application
+• "Yelen AI mooy..." → Yelen AI c'est...
+• "Maa ngi Yelen AI" → Je suis Yelen AI
+• "Dama mën def image" → Je peux créer une image
+• "Dama mën wax ak yow" → Je peux discuter avec toi
+• "Jëmël ma sa laaj" → Pose-moi ta question
+
+═══════════════════════════════════════════════
+EXEMPLES DE CONVERSATIONS COMPLÈTES
+═══════════════════════════════════════════════
+
+Utilisateur: "Nanga def?"
+Réponse: "Mangi fi rekk, jërejëf! Yow noo? Dama weex te dama dem jëf ci sa kow."
+
+Utilisateur: "Dama bëgg xam intelligence artificielle bi"
+Réponse: "Waaw, xam naa! Intelligence artificielle bi moy ordinateur bu mën waxtaan, def nataal, ak bind — nu mel ni nit. Dama jëf ci yow pour yëgël la ko ndax mu neex."
+
+Utilisateur: "Def ma yenn nataal"
+Réponse: "Waaw! Xam ma lan nga bëgg nataal bi — logo, illustration, walla yenn? Wax ma si ci laaj bi, dinaa jëf ko dëgg dëgg."
+
+Utilisateur: "Logo bi rafet na!"
+Réponse: "Jërejëf lool! Dafa rafet, dëgg la wax. Danga bëgg yenn add ci wow?"
+
+Utilisateur: "Lan moy Yelen AI?"
+Réponse: "Maa ngi Yelen AI — intelligence artificielle bu Sénégal. Dama wax wolof ak français, dama mën def nataal yi, ak dama mën jaglël la ci sa liggéey yi. Kan maa tax jëmël ma sa laaj!"
+
+Utilisateur: "Yaangi dem fan?"
+Réponse: "Mangi nekk ci internet bi, dégëlu kaw! Dama dem ci sa kow toujours."
+
+Utilisateur: "Baal ma, duma xam wolof bu baax"
+Réponse: "Amul solo! Wax français rekk bëgg bëgg, dinaa response ci français. Yelen AI dafa mën wax ñaari làkk — wolof ak français. Laaj lañ bëgg!"
+"""
+
+FRENCH_SYSTEM = (
+    "Tu es Yelen AI, un assistant IA africain intelligent, chaleureux et concis. "
+    "Tu réponds toujours en français. "
+    "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel. "
+    "Sois naturel, utile et positif."
+)
+
+# ─────────────────────────────────────────────────────────────
+# HANDLE CHAT
+# ─────────────────────────────────────────────────────────────
+def handle_chat(user_message: str, history: list) -> dict:
     intent = detect_image_intent(user_message)
     if intent:
         img = generate_image(intent["visual_prompt"], intent["type"])
-        return {
-            "response": intent["confirmation_message"],
-            "has_image": True,
-            "image_base64": img,
-            "image_type": intent["type"],
-            "visual_prompt": intent["visual_prompt"],
-        }
+        if img:
+            return {"response": intent["confirmation_message"], "has_image": True, "image_base64": img, "image_type": intent["type"], "visual_prompt": intent["visual_prompt"]}
+        return {"response": "❌ Génération échouée. Réessaie dans quelques secondes."}
 
-    # ── Détection de langue ──
     lang = detect_language(user_message)
+    system = WOLOF_SYSTEM if lang == "wolof" else FRENCH_SYSTEM
 
-    # ── Construction des messages ──
-    # Pour le wolof : prompt construit dynamiquement avec seulement les
-    # exemples du domaine détecté (salutation, remerciement, etc.), pour
-    # un phrasé plus naturel et pertinent sans risque de collision de
-    # sujet. Les exemples ne sont JAMAIS envoyés comme faux tours
-    # user/assistant — uniquement à l'intérieur du system prompt.
-    if lang == "wo":
-        system_prompt = build_wolof_system_prompt(user_message)
-        temperature = 0.65  # un peu plus élevé pour un phrasé moins mécanique
-    else:
-        system_prompt = SYSTEM_PROMPT_FR
-        temperature = 0.5
+    print(f"[LANG DETECTED] {lang} | message='{user_message[:60]}'")
 
-    base_messages = [{"role": "system", "content": system_prompt}]
+    messages = [{"role": "system", "content": system}]
+    for msg in history[-10:]:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
 
-    # Historique de conversation réel (derniers 10 échanges)
-    conversation = base_messages + history[-10:]
-    conversation.append({"role": "user", "content": user_message})
-
-    # ── Appel LLM principal ──
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=conversation,
-        temperature=temperature,
+        messages=messages,
+        temperature=0.7,
         max_tokens=600,
     )
+    return {"response": r.choices[0].message.content}
 
-    response_text = r.choices[0].message.content
-
-    # ── Post-traitement wolof : nettoyage des glissements français ──
-    # Ce passage est CONDITIONNEL (seulement si trop de français détecté)
-    # et reçoit la QUESTION D'ORIGINE en plus de la réponse, pour ne
-    # jamais dériver vers un autre sujet pendant la réécriture.
-    if lang == "wo":
-        response_text = _clean_wolof_response(response_text, user_message)
-
-    result = {"response": response_text, "lang": lang}
-
-    if want_audio_response:
-        audio_b64, tts_error = text_to_speech_base64(response_text, lang=lang)
-        result["audio_base64"] = audio_b64
-        if tts_error:
-            result["tts_error"] = tts_error
-
-    return result
-
-
-def _clean_wolof_response(text: str, original_question: str = "") -> str:
-    """
-    Vérifie si la réponse contient trop de français.
-    Si oui, relance UN SEUL appel de nettoyage ciblé, en lui donnant aussi
-    la question d'origine pour qu'il ne dérive jamais vers un autre sujet
-    pendant la réécriture. Cet appel corrige la langue ET améliore le
-    naturel/rythme oral (pas juste une traduction mot à mot du français
-    résiduel), sans jamais changer le sens ou le sujet.
-    """
-    french_markers = [
-        "je suis", "je vais", "c'est", "il y a", "pour vous",
-        "nous allons", "vous pouvez", "bonjour", "merci beaucoup",
-        "bien sûr", "je peux", "en fait", "cependant", "donc",
-    ]
-    text_lower = text.lower()
-    french_count = sum(1 for m in french_markers if m in text_lower)
-
-    # Si moins de 2 marqueurs français → pas besoin de corriger
-    if french_count < 2:
-        return text
-
-    try:
-        correction = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            temperature=0.4,
-            max_tokens=600,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Yaw mooy éditeur bu wolof bu Dakar, bu xam wolof bu "
-                        "dëgg dëgg wu nit ñi di wax bés bu nekk (pas le wolof "
-                        "littéraire/scolaire).\n"
-                        "Jëfandikoo wolof rekk — bul jëfandikoo français.\n"
-                        "Réécris le texte suivant en wolof naturel, oral, "
-                        "comme le parlerait quelqu'un à Dakar dans une "
-                        "conversation courante — pas une traduction mot à "
-                        "mot, pas un style scolaire ou trop formel.\n"
-                        "Utilise des connecteurs oraux naturels si besoin "
-                        "(waaye, kon, léegi, moo tax...).\n"
-                        "Conserve EXACTEMENT le même sens et le même sujet — "
-                        "ne rajoute aucune information, ne réponds pas à autre "
-                        "chose que ce que le texte dit déjà, ne rallonge pas "
-                        "inutilement.\n"
-                        "Réponds uniquement avec le texte wolof réécrit, rien d'autre."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Question d'origine de l'utilisateur (pour contexte, "
-                        f"ne pas y répondre à nouveau) : {original_question}\n\n"
-                        f"Texte à réécrire en wolof naturel et oral :\n{text}"
-                    )
-                }
-            ]
-        )
-        cleaned = correction.choices[0].message.content.strip()
-        return cleaned if cleaned else text
-
-    except Exception as e:
-        print("[WOLOF CLEAN ERROR]", e)
-        return text
-
-# ─────────────────────────────────────────────
-# ROUTES
-# ─────────────────────────────────────────────
-@app.route("/ping")
+# ─────────────────────────────────────────────────────────────
+# KEEP-ALIVE
+# ─────────────────────────────────────────────────────────────
+@app.route("/ping", methods=["GET"])
 def ping():
-    return "pong"
+    return "pong", 200
 
-
-@app.route("/tts", methods=["POST"])
-def tts():
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
-    lang = (data.get("lang") or "fr").strip()
-
-    if not text:
-        return jsonify({"error": "texte manquant"}), 400
-
-    if len(text) > 4000:
-        text = text[:4000]
-
-    audio_b64, tts_error = text_to_speech_base64(text, lang=lang)
-
-    if not audio_b64:
-        return jsonify({"error": tts_error or "échec de la synthèse vocale"}), 502
-
-    return jsonify({"audio_base64": audio_b64})
-
-
+# ─────────────────────────────────────────────────────────────
+# ROUTE /chat
+# ─────────────────────────────────────────────────────────────
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
 
-    has_audio    = bool(data.get("has_audio"))
-    audio_base64 = data.get("audio_base64")
-    has_image    = bool(data.get("has_image"))
+    user_message = data.get("message", "")
+    has_image    = data.get("has_image", False)
     image_base64 = data.get("image_base64")
-    has_document = bool(data.get("has_document"))
-    document_base64 = data.get("document_base64")
+    has_audio    = data.get("has_audio", False)
+    audio_base64 = data.get("audio_base64")
+    has_document = data.get("has_document", False)
+    doc_base64   = data.get("doc_base64")
+    doc_filename = data.get("doc_filename", "document.txt")
     history      = data.get("history", [])
 
-    # ── Cas document ──
-    if has_document:
-        if not document_base64:
-            return jsonify({"error": "document manquant"}), 400
+    # ── 🎙 AUDIO ──
+    if has_audio and audio_base64:
+        try:
+            audio_bytes = base64.b64decode(audio_base64)
+            if len(audio_bytes) < 500:
+                return jsonify({"response": "❌ Audio trop court. Parle un peu plus longtemps."})
+            transcribed = transcribe_audio(audio_bytes)
+            print("[TRANSCRIPTION]", repr(transcribed))
+            if not transcribed or len(transcribed.strip()) < 2:
+                return jsonify({"response": "❌ Audio non reconnu. Rapproche-toi du micro et réessaie."})
+            result = handle_chat(transcribed, history)
+            result["transcription"]    = transcribed
+            result["is_voice_message"] = True
+            return jsonify(result)
+        except Exception as e:
+            print("[AUDIO ERR]", e)
+            return jsonify({"response": f"❌ Erreur audio : {str(e)}"})
 
-        doc_text, doc_error = extract_pdf_text(document_base64)
-
-        if not doc_text:
+    # ── 📄 DOCUMENT ──
+    if has_document and doc_base64:
+        try:
+            doc_bytes = base64.b64decode(doc_base64)
+            print(f"[DOC] Fichier reçu: {doc_filename} | {len(doc_bytes)} bytes")
+            doc_text = extract_text_from_document(doc_bytes, doc_filename)
+            if doc_text.startswith("❌"):
+                return jsonify({"response": doc_text})
+            print(f"[DOC] Texte extrait: {len(doc_text)} caractères")
+            question = user_message.strip()
+            lang = detect_language(question) if question else "french"
+            response = analyze_document(doc_text, doc_filename, question, lang)
             return jsonify({
-                "error": doc_error or "Impossible de lire ce document",
-                "response": f"❌ {doc_error or 'Je n\'ai pas pu lire ce document.'}",
-            }), 200
+                "response":     response,
+                "has_document": True,
+                "doc_filename": doc_filename,
+                "doc_chars":    len(doc_text),
+            })
+        except Exception as e:
+            print("[DOC ERR]", e)
+            return jsonify({"response": f"❌ Erreur lecture document : {str(e)}"})
 
-        question = (data.get("message") or "Résume ce document en français.").strip()
-        lang = detect_language(question)
-        response_text = analyze_document(doc_text, question, lang=lang)
+    # ── 🖼 ANALYSE IMAGE ──
+    if has_image and image_base64:
+        try:
+            if "," in image_base64:
+                image_base64 = image_base64.split(",", 1)[1]
+            if len(image_base64) < 100:
+                return jsonify({"response": "❌ Image invalide."})
+            mime     = get_mime(image_base64)
+            question = user_message.strip() or "Décris cette image en détail en français."
+            for model in ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"]:
+                try:
+                    r = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_base64}"}},
+                            {"type": "text", "text": question},
+                        ]}],
+                        max_tokens=1024,
+                    )
+                    return jsonify({"response": r.choices[0].message.content})
+                except Exception as e:
+                    print(f"[IMG ERR] {model}: {e}")
+                    continue
+            return jsonify({"response": "❌ Analyse image impossible. Réessaie."})
+        except Exception as e:
+            return jsonify({"response": f"❌ Erreur : {str(e)}"})
 
-        if not response_text:
-            return jsonify({
-                "error": "Impossible d'analyser le document",
-                "response": "❌ Je n'ai pas réussi à analyser ce document, réessaie.",
-            }), 200
-
-        return jsonify({"response": response_text, "lang": lang})
-
-    # ── Cas image (vision) ──
-    if has_image:
-        if not image_base64:
-            return jsonify({"error": "image manquante"}), 400
-
-        question = (data.get("message") or "Décris cette image en détail en français.").strip()
-        lang = detect_language(question)
-        response_text = analyze_image_base64(image_base64, question, lang=lang)
-
-        if not response_text:
-            return jsonify({
-                "error": "Impossible d'analyser l'image",
-                "response": "❌ Je n'ai pas réussi à analyser cette image, réessaie.",
-            }), 200
-
-        return jsonify({"response": response_text, "lang": lang})
-
-    # ── Cas audio (STT → chat) ──
-    transcription = None
-    if has_audio:
-        if not audio_base64:
-            return jsonify({"error": "audio manquant"}), 400
-
-        transcription = transcribe_audio_base64(audio_base64)
-
-        if not transcription:
-            return jsonify({
-                "error": "Impossible de transcrire l'audio",
-                "response": "❌ Je n'ai pas réussi à comprendre le message vocal, réessaie.",
-            }), 200
-
-        user_message = transcription
-    else:
-        user_message = data.get("message", "")
-
+    # ── 💬 TEXTE ──
     if not user_message.strip():
-        return jsonify({"error": "empty message"}), 400
+        return jsonify({"response": "❌ Message vide."})
 
     try:
-        result = handle_chat(user_message, history, want_audio_response=has_audio)
-        if transcription:
-            result["transcription"] = transcription
-        return jsonify(result)
+        return jsonify(handle_chat(user_message, history))
     except Exception as e:
+        print("[CHAT ERR]", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -814,6 +842,6 @@ def chat():
 def home():
     return "Yelen AI API 🌟"
 
-# ─────────────────────────────────────────────
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
