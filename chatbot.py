@@ -139,13 +139,13 @@ WOLOF_WORDS = {
     "loolu moy":        5, "lool la":         5,
     "waxoon na":        5, "waxoon naa":      5,
     "liggéeyal ma":     5, "liggéeyal":       5,
-    "sëriñ":            5, "xaalis":
+    "sëriñ":            5,
 
     # ══ Score 4 : mots très distinctifs wolof ══
     "jërejëf":  4, "jërëjëf":  4, "baal ma":   4,
     "deedeet":  4, "mangi fi":  4, "mangi":     4,
     "maa ngi":  4, "nataal":    4, "nataalu":   4,
-    "liggéey":  4, "liggeeyu":  4, "xaalis":
+    "liggéey":  4, "liggeeyu":  4,
     "dafa":     4, "dama":      4, "xam":       4,
     "bëgg":     4, "siiw":      4, "rekk":      4,
     "yëgël":    4, "woneel":    4, "wone":      4,
@@ -643,6 +643,8 @@ VOCABULAIRE COMPLET PAR THÈME
 • Juróom ñaar → 7  • Juróom ñett → 8  • Juróom ñent → 9
 • Fukk → 10   • Fukk ak benn → 11  • Ñaar fukk → 20
 • Téeméer → 100  • Junni → 1000
+• xaaliss → argent
+
 
 ── EXPRESSIONS POPULAIRES DAKAR ──
 • "Kaay fi!" → Viens ici!
@@ -663,8 +665,6 @@ VOCABULAIRE COMPLET PAR THÈME
 • "Xam sa bopp" → Connais-toi toi-même / Fais attention
 • "Bëgg bëgg" → Vraiment vouloir / Adorer
 • "Dafa gëna rafet" → C'est encore plus beau
-• "xaalis" → C'est encore plus beau
-
 
 ── INTELLIGENCE ARTIFICIELLE EN WOLOF ──
 • "Intelligence artificielle" → "Intelligence artificielle bi" (on garde le terme français)
@@ -711,6 +711,7 @@ FRENCH_SYSTEM = (
 )
 
 
+
 def correct_wolof_transcription(text):
     try:
         r = client.chat.completions.create(
@@ -733,7 +734,6 @@ def correct_wolof_transcription(text):
     except Exception as e:
         print("[CORRECTION ERR]", e)
         return text
-
 # ─────────────────────────────────────────────────────────────
 # HANDLE CHAT
 # ─────────────────────────────────────────────────────────────
