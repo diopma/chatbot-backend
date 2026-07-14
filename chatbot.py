@@ -139,7 +139,7 @@ WOLOF_WORDS = {
     "loolu moy":        5, "lool la":         5,
     "waxoon na":        5, "waxoon naa":      5,
     "liggéeyal ma":     5, "liggéeyal":       5,
-    "sëriñ":            5, "xaalis":          5,
+    "sëriñ":            5, "xaalis":
 
     # ══ Score 4 : mots très distinctifs wolof ══
     "jërejëf":  4, "jërëjëf":  4, "baal ma":   4,
@@ -663,6 +663,8 @@ VOCABULAIRE COMPLET PAR THÈME
 • "Xam sa bopp" → Connais-toi toi-même / Fais attention
 • "Bëgg bëgg" → Vraiment vouloir / Adorer
 • "Dafa gëna rafet" → C'est encore plus beau
+• "xaalis" → C'est encore plus beau
+
 
 ── INTELLIGENCE ARTIFICIELLE EN WOLOF ──
 • "Intelligence artificielle" → "Intelligence artificielle bi" (on garde le terme français)
