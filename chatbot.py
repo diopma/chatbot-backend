@@ -709,29 +709,28 @@ FRENCH_SYSTEM = (
 )
 
 
-
 def correct_wolof_transcription(text):
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Corrige uniquement les erreurs de transcription "
-                    "du wolof et du français. Ne résume pas."
-                )
-            },
-            {"role": "user", "content": text}
-        ],
-        temperature=0,
-        max_tokens=300,
-    )
-    return r.choices[0].message.content.strip()
-
-transcribed = transcribe_audio(audio_bytes)
-transcribed = correct_wolof_transcription(transcribed)
-print("[AUDIO SIZE]", len(audio_bytes))
-print("[TRANSCRIPTION]", repr(transcribed))
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Corrige uniquement les erreurs de transcription "
+                        "du wolof et du français. Ne traduis pas. "
+                        "Ne résume pas. Retourne uniquement la transcription corrigée."
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+            max_tokens=300,
+        )
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print("[CORRECTION ERR]", e)
+        return text
 
 # ─────────────────────────────────────────────────────────────
 # HANDLE CHAT
@@ -795,8 +794,14 @@ def chat():
             audio_bytes = base64.b64decode(audio_base64)
             if len(audio_bytes) < 500:
                 return jsonify({"response": "❌ Audio trop court. Parle un peu plus longtemps."})
+            print("[AUDIO SIZE]", len(audio_bytes))
+
             transcribed = transcribe_audio(audio_bytes)
+
+            transcribed = correct_wolof_transcription(transcribed)
+
             print("[TRANSCRIPTION]", repr(transcribed))
+
             if not transcribed or len(transcribed.strip()) < 2:
                 return jsonify({"response": "❌ Audio non reconnu. Rapproche-toi du micro et réessaie."})
             result = handle_chat(transcribed, history)
