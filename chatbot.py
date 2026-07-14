@@ -245,7 +245,7 @@ def detect_language(text: str) -> str:
 
     print(f"[LANG SCORE] wolof={wolof_score} french={french_score} | text='{t[:60]}'")
 
-    if wolof_score >= 3:                          return "wolof"
+    if wolof_score >= 2:                          return "wolof"
     if wolof_score >= 2 and french_score <= 3:    return "wolof"
     if wolof_score >= 1 and french_score >= 1:    return "wolof"
     if french_score >= 3:                         return "french"
@@ -434,6 +434,8 @@ def transcribe_audio(audio_bytes: bytes) -> str:
             suffix, mime = ".m4a", "audio/mp4"
         elif audio_bytes[:4] == b'OggS':
             suffix, mime = ".ogg", "audio/ogg"
+        elif audio_bytes[:4] == b'\x1A\x45\xDF\xA3':
+            suffix, mime = ".webm", "audio/webm"
 
     print(f"[AUDIO] {suffix} — {len(audio_bytes)} bytes")
 
@@ -448,17 +450,12 @@ def transcribe_audio(audio_bytes: bytes) -> str:
                 file=(f"audio{suffix}", f, mime),
                 response_format="text",
                 prompt=(
-                    "Transcris exactement ce qui est dit en wolof sénégalais ou français. "
-                    "Le wolof a ces caractéristiques : ë (e avec tréma), ñ, ŋ, accent tonique. "
-                    "Mots wolof très fréquents : "
-                    "nanga def, mangi fi rekk, jërejëf, waaw, deedeet, dama, dafa, xam, "
-                    "dem, ñëw, lekk, wax, nekk, bi, yi, ci, ak, sama, bëgg, nataal, "
-                    "def ma, bind ma, xale, baay, yaay, xarit, mbokk, ndax, baal ma, "
-                    "yow, moom, sunu, seen, rekk, lool, daldi, kaay, ñu, mu, "
-                    "gis, jox, naan, teg, fal, sol, door, xool, soppi, muñ, "
-                    "tubaab, wolof, seereer, kër, suñu, yalla, baraka, incha allah, "
-                    "asalaa maalekum, maalekum salaam. "
-                    "Termes tech possibles : logo, image, avatar, créer, générer, intelligence artificielle."
+                     "Cette conversation est en wolof sénégalais et français. "
+    "Transcris exactement les mots prononcés. "
+    "Ne traduis jamais le wolof. "
+    "Mots fréquents : nanga def, jërejëf, waaw, deedeet, dama, dafa, "
+    "xam, dem, ñëw, wax, nekk, sama, yow, mbokk, xarit."
+                    
                 ),
             )
         text = result if isinstance(result, str) else getattr(result, "text", str(result))
@@ -710,6 +707,31 @@ FRENCH_SYSTEM = (
     "Tu peux créer des images, logos, illustrations, analyser des documents PDF/Word/Excel. "
     "Sois naturel, utile et positif."
 )
+
+
+
+def correct_wolof_transcription(text):
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Corrige uniquement les erreurs de transcription "
+                    "du wolof et du français. Ne résume pas."
+                )
+            },
+            {"role": "user", "content": text}
+        ],
+        temperature=0,
+        max_tokens=300,
+    )
+    return r.choices[0].message.content.strip()
+
+transcribed = transcribe_audio(audio_bytes)
+transcribed = correct_wolof_transcription(transcribed)
+print("[AUDIO SIZE]", len(audio_bytes))
+print("[TRANSCRIPTION]", repr(transcribed))
 
 # ─────────────────────────────────────────────────────────────
 # HANDLE CHAT
