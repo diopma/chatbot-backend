@@ -139,13 +139,13 @@ WOLOF_WORDS = {
     "loolu moy":        5, "lool la":         5,
     "waxoon na":        5, "waxoon naa":      5,
     "liggéeyal ma":     5, "liggéeyal":       5,
-    "sëriñ":            5, "xaalis"
+    "sëriñ":            5, "xaalis":          5,
 
     # ══ Score 4 : mots très distinctifs wolof ══
     "jërejëf":  4, "jërëjëf":  4, "baal ma":   4,
     "deedeet":  4, "mangi fi":  4, "mangi":     4,
     "maa ngi":  4, "nataal":    4, "nataalu":   4,
-    "liggéey":  4, "liggeeyu":  4,
+    "liggéey":  4, "liggeeyu":  4, "xaalis":
     "dafa":     4, "dama":      4, "xam":       4,
     "bëgg":     4, "siiw":      4, "rekk":      4,
     "yëgël":    4, "woneel":    4, "wone":      4,
