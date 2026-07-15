@@ -443,20 +443,33 @@ def transcribe_audio(audio_bytes: bytes) -> str:
         tmp.write(audio_bytes)
         path = tmp.name
 
+    # Whisper ne supporte pas nativement le wolof ("wo" n'est pas une langue
+    # reconnue par le modèle). On force donc le décodage en "fr" pour éviter
+    # que le modèle bascule au hasard entre plusieurs langues au milieu d'un
+    # même audio (source principale des transcriptions incohérentes), et on
+    # compense avec un prompt riche : un exemple de texte NATUREL mêlant
+    # wolof et français, avec tous les diacritiques (ë, ñ, ó, à, é...), ce
+    # qui biaise beaucoup mieux le modèle qu'une simple liste de mots isolés.
+    WHISPER_WOLOF_PROMPT = (
+        "Nanga def? Jërejëf waay, mangi fi rekk, dama bëgg wax ak yow ci "
+        "sama liggéey bi. Dafa neex na lool, waaye dama xam ne dinaa dem "
+        "ci kër gi tey. Sama xarit yi ñëw ci dëkk bi, ñu ngi wax ci wolof "
+        "ak français ñaari yoon. Bul fekk, dégg naa la bu baax, waaw waaw "
+        "loolu moy dëgg. Yaangi dem fan? Mangi nekk ci internet bi. Baal "
+        "ma, ndax dama bëgg nga jàppale ma ci nataal bi, defal ma ko su la "
+        "neexee. Asalaa maalekum, maalekum salaam, jërejëf lool sama "
+        "mbokk."
+    )
+
     try:
         with open(path, "rb") as f:
             result = client.audio.transcriptions.create(
                 model="whisper-large-v3",
                 file=(f"audio{suffix}", f, mime),
                 response_format="text",
-                prompt=(
-                     "Cette conversation est en wolof sénégalais et français. "
-    "Transcris exactement les mots prononcés. "
-    "Ne traduis jamais le wolof. "
-    "Mots fréquents : nanga def, jërejëf, waaw, deedeet, dama, dafa, "
-    "xam, dem, ñëw, wax, nekk, sama, yow, mbokk, xarit."
-                    
-                ),
+                language="fr",
+                temperature=0.0,
+                prompt=WHISPER_WOLOF_PROMPT,
             )
         text = result if isinstance(result, str) else getattr(result, "text", str(result))
         print(f"[WHISPER] texte={repr(text)}")
@@ -712,7 +725,18 @@ FRENCH_SYSTEM = (
 
 
 
+# Glossaire de référence (mots wolof les plus distinctifs, réutilisé depuis
+# WOLOF_WORDS) injecté dans le prompt de correction pour que le modèle sache
+# vers quelles graphies correctes recaler les approximations phonétiques de
+# Whisper (qui, faute de support natif du wolof, transcrit souvent ces mots
+# en orthographe française approchante).
+_WOLOF_REFERENCE_TERMS = sorted(
+    {w for w, score in WOLOF_WORDS.items() if score >= 3},
+    key=len, reverse=True,
+)[:150]
+
 def correct_wolof_transcription(text):
+    glossary = ", ".join(_WOLOF_REFERENCE_TERMS)
     try:
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -720,15 +744,32 @@ def correct_wolof_transcription(text):
                 {
                     "role": "system",
                     "content": (
-                        "Corrige uniquement les erreurs de transcription "
-                        "du wolof et du français. Ne traduis pas. "
-                        "Ne résume pas. Retourne uniquement la transcription corrigée."
+                        "Tu es un correcteur expert de transcriptions vocales wolof/français "
+                        "réalisées par un modèle qui ne connaît pas le wolof et retranscrit "
+                        "donc souvent les mots wolof par leur approximation phonétique en "
+                        "orthographe française. Ton rôle : reconnaître ces déformations et "
+                        "restituer la graphie wolof correcte (avec les diacritiques ë, ñ, ó, "
+                        "à, é, etc.), sans changer le sens ni la langue du message.\n\n"
+                        "Règles strictes :\n"
+                        "- Ne traduis JAMAIS le wolof vers le français, ni l'inverse.\n"
+                        "- Ne résume pas, ne reformule pas, ne complète pas la phrase.\n"
+                        "- Corrige uniquement l'orthographe/les mots mal transcrits, en te "
+                        "basant sur la phonétique et le contexte.\n"
+                        "- Si le message mélange wolof et français (courant à Dakar), garde "
+                        "ce mélange tel quel.\n"
+                        "- Exemples de déformations fréquentes à corriger : \"nanga def\" "
+                        "(parfois écrit \"nan ga def\", \"nangadef\"), \"jërejëf\" (\"jere jef\", "
+                        "\"djeredjef\"), \"dëgg\" (\"deug\"), \"bëgg\" (\"beug\"), \"xam\" (\"cham\", "
+                        "\"kham\"), \"ñëw\" (\"gnew\"), \"waaw\" (\"wow\"), \"deedeet\" (\"didi\").\n"
+                        f"- Vocabulaire wolof de référence à privilégier si le contexte "
+                        f"phonétique correspond : {glossary}.\n\n"
+                        "Retourne uniquement la transcription corrigée, rien d'autre."
                     ),
                 },
                 {"role": "user", "content": text},
             ],
             temperature=0,
-            max_tokens=300,
+            max_tokens=500,
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -806,7 +847,16 @@ def chat():
 
             if not transcribed or len(transcribed.strip()) < 2:
                 return jsonify({"response": "❌ Audio non reconnu. Rapproche-toi du micro et réessaie."})
-            result = handle_chat(transcribed, history)
+
+            # On isole cet appel : si la génération de réponse échoue, on veut
+            # quand même renvoyer la transcription au frontend plutôt que de
+            # la perdre dans un message d'erreur générique.
+            try:
+                result = handle_chat(transcribed, history)
+            except Exception as e:
+                print("[CHAT AFTER AUDIO ERR]", e)
+                result = {"response": f"❌ Erreur lors de la réponse : {str(e)}"}
+
             result["transcription"]    = transcribed
             result["is_voice_message"] = True
             return jsonify(result)
