@@ -5,3 +5,4 @@ python-dotenv
 gunicorn
 flask-limiter
 requests
+gTTS
