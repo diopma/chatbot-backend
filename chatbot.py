@@ -974,6 +974,48 @@ def ping():
     return "pong", 200
 
 # ─────────────────────────────────────────────────────────────
+# ROUTE TTS
+# ─────────────────────────────────────────────────────────────
+@app.route("/tts", methods=["POST"])
+def tts():
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "invalid request"
+        }), 400
+
+    text = data.get("text", "").strip()
+
+    if not text:
+        return jsonify({
+            "error": "Texte vide"
+        }), 400
+
+    try:
+
+        audio = generate_speech(text)
+
+        if not audio:
+            return jsonify({
+                "error": "Synthèse vocale indisponible"
+            }), 500
+
+        return jsonify({
+            "audio_base64": audio,
+            "has_audio_response": True
+        })
+
+    except Exception as e:
+
+        print("[TTS ROUTE ERROR]", e)
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# ─────────────────────────────────────────────────────────────
 # ROUTE /chat
 # ─────────────────────────────────────────────────────────────
 @app.route("/chat", methods=["POST"])
@@ -1022,10 +1064,19 @@ def chat():
             result["is_voice_message"] = True
 
             # Réponse lue à voix haute (message reçu en vocal → on répond en vocal).
-            audio_reply = generate_speech(result.get("response", ""))
+            # Génération voix uniquement si la réponse existe
+            response_text = result.get("response", "")
+
+            if response_text:
+               audio_reply = generate_speech(response_text)
+
             if audio_reply:
-                result["audio_base64"]     = audio_reply
-                result["has_audio_response"] = True
+               result["audio_base64"] = audio_reply
+               result["has_audio_response"] = True
+
+            if audio_reply:
+               result["audio_base64"]     = audio_reply
+               result["has_audio_response"] = True
 
             return jsonify(result)
         except Exception as e:
