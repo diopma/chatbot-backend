@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import tempfile
 import urllib.parse
@@ -8,6 +9,14 @@ import io
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
+
+try:
+    from gtts import gTTS
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+    print("[TTS] Module gTTS non installé — réponses vocales désactivées. "
+          "Installe-le avec : pip install gTTS")
 
 app = Flask(__name__)
 CORS(app)
@@ -378,6 +387,24 @@ def translate_prompt_to_english(prompt: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # GÉNÉRATION IMAGE
 # ─────────────────────────────────────────────────────────────
+def _looks_like_image(raw: bytes) -> bool:
+    """Vérifie la signature binaire pour s'assurer qu'on a bien reçu une
+    image (PNG/JPEG/WEBP/GIF) et pas une page d'erreur/HTML/JSON déguisée
+    en réponse — c'est ce qui faisait qu'auparavant 'rien ne s'affichait' :
+    du contenu invalide était encodé en base64 et envoyé tel quel."""
+    if not raw or len(raw) < 500:
+        return False
+    if raw[:8] == b'\x89PNG\r\n\x1a\n':
+        return True
+    if raw[:2] == b'\xff\xd8':
+        return True
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return True
+    if raw[:6] in (b'GIF87a', b'GIF89a'):
+        return True
+    return False
+
+
 def generate_image(prompt: str, gen_type: str) -> str | None:
     english = translate_prompt_to_english(prompt)
     prefix  = TYPE_PROMPTS.get(gen_type, "")
@@ -394,7 +421,10 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
                 timeout=90,
             )
             r.raise_for_status()
-            return r.json()["data"][0]["b64_json"]
+            b64 = r.json()["data"][0]["b64_json"]
+            if b64 and _looks_like_image(base64.b64decode(b64)):
+                return b64
+            print("[FLUX ERR] réponse reçue mais contenu non-image, on tente le fallback")
         except Exception as e:
             print("[FLUX ERR]", e)
 
@@ -402,9 +432,81 @@ def generate_image(prompt: str, gen_type: str) -> str | None:
         enc = urllib.parse.quote(full)
         url = f"https://image.pollinations.ai/prompt/{enc}?width={w}&height={h}&nologo=true&enhance=true&model=flux"
         res = requests.get(url, timeout=90)
-        return base64.b64encode(res.content).decode()
+        if res.status_code == 200 and _looks_like_image(res.content):
+            return base64.b64encode(res.content).decode()
+        print(f"[POLLINATIONS ERR] status={res.status_code} content_type={res.headers.get('Content-Type')} taille={len(res.content)}")
+        return None
     except Exception as e:
         print("[POLLINATIONS ERR]", e)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────
+# ÉDITION / MODIFICATION D'IMAGE (FLUX.1 Kontext via Together AI)
+# ─────────────────────────────────────────────────────────────
+IMAGE_EDIT_KEYWORDS = [
+    "modifie", "modifier", "modifiez", "modification",
+    "change", "changer", "changes",
+    "transforme", "transformer",
+    "édite", "editer", "éditer", "édition",
+    "remplace", "remplacer",
+    "ajoute", "ajouter", "ajoutes",
+    "enlève", "enleve", "enlever", "retire", "retirer",
+    "supprime", "supprimer", "efface", "effacer",
+    "colore", "colorie", "coloriser", "recolore",
+    "améliore", "ameliore", "améliorer",
+    "soppi", "soppil", "soppiwaale",
+]
+
+def detect_image_edit_intent(msg: str) -> bool:
+    m = _norm(msg)
+    return any(_norm(kw) in m for kw in IMAGE_EDIT_KEYWORDS)
+
+
+def edit_image(image_base64: str, mime: str, instruction: str) -> str | None:
+    """Édite une image existante (envoyée par l'utilisateur) selon une
+    instruction textuelle, via FLUX.1 Kontext sur Together AI."""
+    if not TOGETHER_API_KEY:
+        print("[EDIT IMG] TOGETHER_API_KEY manquant — édition d'image impossible.")
+        return None
+
+    english_instruction = translate_prompt_to_english(instruction)
+    data_uri = f"data:{mime};base64,{image_base64}"
+    print(f"[EDIT IMG] instruction='{english_instruction[:80]}...'")
+
+    try:
+        r = requests.post(
+            "https://api.together.xyz/v1/images/generations",
+            headers={"Authorization": f"Bearer {TOGETHER_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "black-forest-labs/FLUX.1-kontext-pro",
+                "prompt": english_instruction,
+                "image_url": data_uri,
+                "width": 1024,
+                "height": 1024,
+                "steps": 28,
+                "n": 1,
+                "response_format": "b64_json",
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        data = r.json()["data"][0]
+
+        b64 = data.get("b64_json")
+        if b64 and _looks_like_image(base64.b64decode(b64)):
+            return b64
+
+        img_url = data.get("url")
+        if img_url:
+            img_res = requests.get(img_url, timeout=60)
+            if img_res.status_code == 200 and _looks_like_image(img_res.content):
+                return base64.b64encode(img_res.content).decode()
+
+        print("[EDIT IMG ERR] réponse reçue mais contenu non-image")
+        return None
+    except Exception as e:
+        print("[EDIT IMG ERR]", e)
         return None
 
 # ─────────────────────────────────────────────────────────────
@@ -419,6 +521,11 @@ def get_mime(b64: str) -> str:
     except Exception:
         pass
     return "image/jpeg"
+
+def _wolof_score(text: str) -> int:
+    t = text.lower()
+    return sum(weight for word, weight in WOLOF_WORDS.items() if word in t)
+
 
 # ─────────────────────────────────────────────────────────────
 # TRANSCRIPTION AUDIO
@@ -461,19 +568,39 @@ def transcribe_audio(audio_bytes: bytes) -> str:
         "mbokk."
     )
 
-    try:
+    def _run(language: str | None) -> str:
+        kwargs = dict(
+            model="whisper-large-v3",
+            response_format="text",
+            temperature=0.0,
+            prompt=WHISPER_WOLOF_PROMPT,
+        )
+        if language:
+            kwargs["language"] = language
         with open(path, "rb") as f:
-            result = client.audio.transcriptions.create(
-                model="whisper-large-v3",
-                file=(f"audio{suffix}", f, mime),
-                response_format="text",
-                language="fr",
-                temperature=0.0,
-                prompt=WHISPER_WOLOF_PROMPT,
-            )
+            result = client.audio.transcriptions.create(file=(f"audio{suffix}", f, mime), **kwargs)
         text = result if isinstance(result, str) else getattr(result, "text", str(result))
-        print(f"[WHISPER] texte={repr(text)}")
         return (text or "").strip()
+
+    try:
+        # Whisper hésite souvent entre plusieurs langues sur du wolof pur.
+        # On tente deux décodages (français forcé, puis auto-détection) et
+        # on garde celui qui contient le plus de vocabulaire wolof reconnu
+        # — bien meilleur qu'un seul essai à l'aveugle.
+        candidates = []
+        for lang in ("fr", None):
+            try:
+                text = _run(lang)
+                if text:
+                    candidates.append(text)
+            except Exception as e:
+                print(f"[WHISPER lang={lang} ERR]", e)
+
+        if not candidates:
+            return ""
+        best = max(candidates, key=_wolof_score) if len(candidates) > 1 else candidates[0]
+        print(f"[WHISPER] candidats={candidates!r} → retenu={best!r}")
+        return best
     finally:
         os.unlink(path)
 
@@ -776,6 +903,40 @@ def correct_wolof_transcription(text):
         print("[CORRECTION ERR]", e)
         return text
 # ─────────────────────────────────────────────────────────────
+# SYNTHÈSE VOCALE (réponse lue à voix haute)
+# ─────────────────────────────────────────────────────────────
+# ⚠️ Aucun moteur TTS ne supporte officiellement le wolof aujourd'hui.
+# Le TTS de Groq (Orpheus/PlayAI) ne couvre que l'anglais et l'arabe — donc
+# inutilisable ici. On utilise gTTS (français) comme meilleure approximation
+# disponible : la prononciation du wolof restera imparfaite (lu avec un
+# accent français), mais c'est l'option la plus proche sans service payant
+# dédié au wolof.
+_MD_CLEAN_RE   = re.compile(r'[*_`#>~\[\]()]')
+_EMOJI_CLEAN_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]+"
+)
+
+def _clean_text_for_speech(text: str) -> str:
+    t = _EMOJI_CLEAN_RE.sub("", text)
+    t = _MD_CLEAN_RE.sub("", t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+def generate_speech(text: str) -> str | None:
+    if not TTS_AVAILABLE:
+        return None
+    clean = _clean_text_for_speech(text)[:1000]
+    if not clean:
+        return None
+    try:
+        buf = io.BytesIO()
+        gTTS(text=clean, lang="fr").write_to_fp(buf)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        print("[TTS ERR]", e)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────
 # HANDLE CHAT
 # ─────────────────────────────────────────────────────────────
 def handle_chat(user_message: str, history: list) -> dict:
@@ -804,6 +965,14 @@ def handle_chat(user_message: str, history: list) -> dict:
         max_tokens=600,
     )
     return {"response": r.choices[0].message.content}
+
+# ─────────────────────────────────────────────────────────────
+# DOCUMENT EN ATTENTE D'INSTRUCTION
+# ─────────────────────────────────────────────────────────────
+# Quand un document est envoyé SANS instruction, on le garde ici le temps
+# que l'utilisateur réponde à "qu'est-ce que tu veux que j'en fasse ?".
+# Mémoire simple en process (pas de session multi-utilisateur ici).
+_PENDING_DOCUMENT = {"text": None, "filename": None, "waiting": False}
 
 # ─────────────────────────────────────────────────────────────
 # KEEP-ALIVE
@@ -859,6 +1028,13 @@ def chat():
 
             result["transcription"]    = transcribed
             result["is_voice_message"] = True
+
+            # Réponse lue à voix haute (message reçu en vocal → on répond en vocal).
+            audio_reply = generate_speech(result.get("response", ""))
+            if audio_reply:
+                result["audio_base64"]     = audio_reply
+                result["has_audio_response"] = True
+
             return jsonify(result)
         except Exception as e:
             print("[AUDIO ERR]", e)
@@ -874,19 +1050,38 @@ def chat():
                 return jsonify({"response": doc_text})
             print(f"[DOC] Texte extrait: {len(doc_text)} caractères")
             question = user_message.strip()
-            lang = detect_language(question) if question else "french"
-            response = analyze_document(doc_text, doc_filename, question, lang)
+
+            if question:
+                # Une instruction accompagne déjà le document → on analyse direct.
+                lang = detect_language(question)
+                response = analyze_document(doc_text, doc_filename, question, lang)
+                _PENDING_DOCUMENT.update(text=None, filename=None, waiting=False)
+                return jsonify({
+                    "response":     response,
+                    "has_document": True,
+                    "doc_filename": doc_filename,
+                    "doc_chars":    len(doc_text),
+                })
+
+            # Pas d'instruction : on NE lance PAS l'analyse. On garde le
+            # document en mémoire et on demande d'abord ce qu'il faut en faire.
+            _PENDING_DOCUMENT.update(text=doc_text, filename=doc_filename, waiting=True)
             return jsonify({
-                "response":     response,
-                "has_document": True,
-                "doc_filename": doc_filename,
-                "doc_chars":    len(doc_text),
+                "response": (
+                    f"📄 J'ai bien reçu **{doc_filename}** ({len(doc_text)} caractères). "
+                    "Qu'est-ce que tu veux que j'en fasse ? Par exemple : en faire un résumé, "
+                    "l'analyser en détail, chercher une info précise dedans, le traduire..."
+                ),
+                "has_document":         True,
+                "doc_filename":         doc_filename,
+                "doc_chars":            len(doc_text),
+                "awaiting_instruction": True,
             })
         except Exception as e:
             print("[DOC ERR]", e)
             return jsonify({"response": f"❌ Erreur lecture document : {str(e)}"})
 
-    # ── 🖼 ANALYSE IMAGE ──
+    # ── 🖼 IMAGE : ÉDITION ou ANALYSE ──
     if has_image and image_base64:
         try:
             if "," in image_base64:
@@ -894,7 +1089,23 @@ def chat():
             if len(image_base64) < 100:
                 return jsonify({"response": "❌ Image invalide."})
             mime     = get_mime(image_base64)
-            question = user_message.strip() or "Décris cette image en détail en français."
+            question = user_message.strip()
+
+            # L'utilisateur a envoyé une image + une instruction de modification
+            # ("change la couleur...", "enlève le fond...", "soppi...").
+            if question and detect_image_edit_intent(question):
+                edited = edit_image(image_base64, mime, question)
+                if edited:
+                    return jsonify({
+                        "response":     "🎨 Voici l'image modifiée !",
+                        "has_image":    True,
+                        "image_base64": edited,
+                        "image_type":   "edit",
+                    })
+                return jsonify({"response": "❌ Modification de l'image échouée. Réessaie dans quelques secondes, ou reformule l'instruction."})
+
+            # Sinon : description/analyse classique de l'image
+            question = question or "Décris cette image en détail en français."
             for model in ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"]:
                 try:
                     r = client.chat.completions.create(
@@ -916,6 +1127,25 @@ def chat():
     # ── 💬 TEXTE ──
     if not user_message.strip():
         return jsonify({"response": "❌ Message vide."})
+
+    # Un document attend une instruction : ce message texte EST l'instruction.
+    if _PENDING_DOCUMENT["waiting"] and _PENDING_DOCUMENT["text"]:
+        question       = user_message.strip()
+        pending_text   = _PENDING_DOCUMENT["text"]
+        pending_name   = _PENDING_DOCUMENT["filename"]
+        _PENDING_DOCUMENT.update(text=None, filename=None, waiting=False)
+        try:
+            lang     = detect_language(question)
+            response = analyze_document(pending_text, pending_name, question, lang)
+            return jsonify({
+                "response":     response,
+                "has_document": True,
+                "doc_filename": pending_name,
+                "doc_chars":    len(pending_text),
+            })
+        except Exception as e:
+            print("[DOC PENDING ERR]", e)
+            return jsonify({"response": f"❌ Erreur lors de l'analyse : {str(e)}"})
 
     try:
         return jsonify(handle_chat(user_message, history))
