@@ -1030,11 +1030,6 @@ def chat():
             result["is_voice_message"] = True
 
             # Réponse lue à voix haute (message reçu en vocal → on répond en vocal).
-            result = handle_chat(user_message, history)
-
-            audio_reply = generate_speech(result["response"])
-
-
             if audio_reply:
                 result["audio_base64"]     = audio_reply
                 result["has_audio_response"] = True
