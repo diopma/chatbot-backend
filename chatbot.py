@@ -967,14 +967,6 @@ def handle_chat(user_message: str, history: list) -> dict:
     return {"response": r.choices[0].message.content}
 
 # ─────────────────────────────────────────────────────────────
-# DOCUMENT EN ATTENTE D'INSTRUCTION
-# ─────────────────────────────────────────────────────────────
-# Quand un document est envoyé SANS instruction, on le garde ici le temps
-# que l'utilisateur réponde à "qu'est-ce que tu veux que j'en fasse ?".
-# Mémoire simple en process (pas de session multi-utilisateur ici).
-_PENDING_DOCUMENT = {"text": None, "filename": None, "waiting": False}
-
-# ─────────────────────────────────────────────────────────────
 # KEEP-ALIVE
 # ─────────────────────────────────────────────────────────────
 @app.route("/ping", methods=["GET"])
@@ -1050,32 +1042,13 @@ def chat():
                 return jsonify({"response": doc_text})
             print(f"[DOC] Texte extrait: {len(doc_text)} caractères")
             question = user_message.strip()
-
-            if question:
-                # Une instruction accompagne déjà le document → on analyse direct.
-                lang = detect_language(question)
-                response = analyze_document(doc_text, doc_filename, question, lang)
-                _PENDING_DOCUMENT.update(text=None, filename=None, waiting=False)
-                return jsonify({
-                    "response":     response,
-                    "has_document": True,
-                    "doc_filename": doc_filename,
-                    "doc_chars":    len(doc_text),
-                })
-
-            # Pas d'instruction : on NE lance PAS l'analyse. On garde le
-            # document en mémoire et on demande d'abord ce qu'il faut en faire.
-            _PENDING_DOCUMENT.update(text=doc_text, filename=doc_filename, waiting=True)
+            lang = detect_language(question) if question else "french"
+            response = analyze_document(doc_text, doc_filename, question, lang)
             return jsonify({
-                "response": (
-                    f"📄 J'ai bien reçu **{doc_filename}** ({len(doc_text)} caractères). "
-                    "Qu'est-ce que tu veux que j'en fasse ? Par exemple : en faire un résumé, "
-                    "l'analyser en détail, chercher une info précise dedans, le traduire..."
-                ),
-                "has_document":         True,
-                "doc_filename":         doc_filename,
-                "doc_chars":            len(doc_text),
-                "awaiting_instruction": True,
+                "response":     response,
+                "has_document": True,
+                "doc_filename": doc_filename,
+                "doc_chars":    len(doc_text),
             })
         except Exception as e:
             print("[DOC ERR]", e)
@@ -1127,25 +1100,6 @@ def chat():
     # ── 💬 TEXTE ──
     if not user_message.strip():
         return jsonify({"response": "❌ Message vide."})
-
-    # Un document attend une instruction : ce message texte EST l'instruction.
-    if _PENDING_DOCUMENT["waiting"] and _PENDING_DOCUMENT["text"]:
-        question       = user_message.strip()
-        pending_text   = _PENDING_DOCUMENT["text"]
-        pending_name   = _PENDING_DOCUMENT["filename"]
-        _PENDING_DOCUMENT.update(text=None, filename=None, waiting=False)
-        try:
-            lang     = detect_language(question)
-            response = analyze_document(pending_text, pending_name, question, lang)
-            return jsonify({
-                "response":     response,
-                "has_document": True,
-                "doc_filename": pending_name,
-                "doc_chars":    len(pending_text),
-            })
-        except Exception as e:
-            print("[DOC PENDING ERR]", e)
-            return jsonify({"response": f"❌ Erreur lors de l'analyse : {str(e)}"})
 
     try:
         return jsonify(handle_chat(user_message, history))
